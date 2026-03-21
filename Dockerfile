@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # Runtime deps for the managed scripts (bash, curl, python3 already in base)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash curl ca-certificates \
+    bash curl ca-certificates docker.io \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

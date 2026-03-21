@@ -90,12 +90,21 @@
                 {% endif %}
               </form>
               <div class="cmd-preview" id="cmd-{{ key }}"></div>
+              {% if cfg.config_path is defined %}
+              <div class="config-path-row">
+                <span class="config-path-label">config.yaml:</span>
+                <code class="config-path">{{ cfg.config_path }}</code>
+              </div>
+              {% endif %}
             </td>
             <td class="tool-action">
               <button class="run-btn" id="btn-{{ key }}"
                       onclick="runTool('{{ key }}', document.getElementById('form-{{ key }}'))">
                 ▶ Starten
               </button>
+              {% if cfg.config_path is defined %}
+              <button class="test-btn" onclick="runTestOverlay('{{ key }}')">🎨 Test Overlay</button>
+              {% endif %}
             </td>
             <td class="tool-logs">
               {% if log_files[key] %}
@@ -295,6 +304,27 @@
 
       // Keep max 10
       while (ul.children.length > 10) ul.removeChild(ul.lastChild);
+    }
+
+    function runTestOverlay(tool) {
+      const form = document.getElementById('form-' + tool);
+      const radios = form.querySelectorAll('[name="content_filter"]');
+      let type = 'movies';
+      radios.forEach(r => { if (r.checked && r.value === '--series-only') type = 'series'; });
+
+      fetch('/api/test-overlay', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tool, type})
+      }).then(r => {
+        if (!r.ok) return r.json().then(j => { throw new Error(j.error || 'Test overlay failed'); });
+        const name = r.headers.get('X-Item-Name') || 'preview';
+        return r.blob().then(blob => ({blob, name}));
+      }).then(({blob, name}) => {
+        const url = URL.createObjectURL(blob);
+        const win = window.open('', '_blank');
+        win.document.write(`<html><body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh"><h2 style="color:#fff;font-family:sans-serif;padding:1rem">${name}</h2><img src="${url}" style="max-width:500px;border-radius:8px;box-shadow:0 4px 32px #000"></body></html>`);
+      }).catch(e => alert('Fehler: ' + e.message));
     }
   </script>
 </body>

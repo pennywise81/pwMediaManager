@@ -8,13 +8,38 @@ import uuid
 import json
 import time
 import glob
+import random
+import io
+import re
+import requests as http_requests
 from datetime import datetime
 from pathlib import Path
 from flask import Flask, render_template, request, Response, jsonify, send_file, abort
 
+try:
+    from PIL import Image, ImageDraw
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
 app = Flask(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
+
+def load_conf():
+    conf = {}
+    conf_path = "/boot/config/pwMediaEnhancer.conf"
+    if os.path.exists(conf_path):
+        with open(conf_path) as f:
+            for line in f:
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    conf[k.strip()] = v.strip().strip('"\'')
+    return conf
+
+CONF = load_conf()
+TMDB_API_KEY = CONF.get("TMDB_API_KEY", os.environ.get("TMDB_API_KEY", ""))
 
 SCRIPTS = {
     "pwMediaEnhancer": {
@@ -81,6 +106,45 @@ SCRIPTS = {
                 "label":   "Serien-Verzeichnis",
                 "default": "/fileserver/Serien",
                 "help":    "Pfad zum Ordner mit den Serienordnern, z. B. /mnt/user/Fileserver/Serien. Jeder Unterordner ist eine Serie mit Season-Unterordnern.",
+            },
+        ],
+    },
+    "pwKometaManager": {
+        "label":       "pwKometaManager",
+        "description": "Kometa — Plex Collections & Overlays.",
+        "readme_url":  "https://github.com/pennywise81/pwKometaManager#readme",
+        "script":      "/scripts/pwKometaManager/pwKometaManager.sh",
+        "host_script": "/mnt/user/Fileserver/scripts/pwKometaManager/pwKometaManager.sh",
+        "log_prefix":  "pwKometaManager",
+        "config_path": "/mnt/user/appdata/kometa/config/config.yaml",
+        "params": [
+            {"id": "dry_run", "flag": "--dry-run", "label": "Dry-Run"},
+        ],
+        "radio_groups": [
+            {
+                "id": "content_filter",
+                "label": "Bibliothek",
+                "options": [
+                    {"value": "",               "label": "Alle"},
+                    {"value": "--movies-only",  "label": "Nur Filme"},
+                    {"value": "--series-only",  "label": "Nur Serien"},
+                ],
+            },
+        ],
+        "dir_inputs": [
+            {
+                "id":      "movies_dir",
+                "flag":    "--movies-dir",
+                "label":   "Filme-Verzeichnis",
+                "default": "/fileserver/Filme",
+                "help":    "Pfad zum Ordner mit den Filmordnern auf Unraid, z.B. /mnt/user/Fileserver/Filme.",
+            },
+            {
+                "id":      "series_dir",
+                "flag":    "--series-dir",
+                "label":   "Serien-Verzeichnis",
+                "default": "/fileserver/Serien",
+                "help":    "Pfad zum Ordner mit den Serienordnern auf Unraid, z.B. /mnt/user/Fileserver/Serien.",
             },
         ],
     },
@@ -181,6 +245,12 @@ def run_tool(tool):
     for param in cfg.get("params", []):
         if request.form.get(param["id"]):
             cmd.append(param["flag"])
+
+    # Radio groups (mutually exclusive flags, e.g. --movies-only / --series-only)
+    for rg in cfg.get("radio_groups", []):
+        val = request.form.get(rg["id"], "").strip()
+        if val:
+            cmd.append(val)
 
     # Directory inputs (pwMediaEnhancer: --movies DIR --series DIR)
     tool_settings = {}
@@ -289,6 +359,95 @@ def api_settings():
         save_settings(request.json or {})
         return jsonify({"ok": True})
     return jsonify(load_settings())
+
+
+@app.route("/api/test-overlay", methods=["POST"])
+def test_overlay():
+    if not PIL_AVAILABLE:
+        return jsonify({"error": "Pillow not installed"}), 500
+
+    data = request.json or {}
+    tool = data.get("tool", "pwKometaManager")
+    overlay_type = data.get("type", "movies")
+
+    cfg = SCRIPTS.get(tool)
+    if not cfg:
+        return jsonify({"error": "unknown tool"}), 404
+
+    settings = load_settings()
+    dir_key = "movies_dir" if overlay_type == "movies" else "series_dir"
+    default_dir = "/fileserver/Filme" if overlay_type == "movies" else "/fileserver/Serien"
+    base_dir = settings.get(f"{tool}_{dir_key}", default_dir)
+
+    try:
+        entries = [e for e in os.scandir(base_dir) if e.is_dir()]
+    except Exception as e:
+        return jsonify({"error": f"Cannot list directory: {e}"}), 500
+
+    if not entries:
+        return jsonify({"error": "No entries found in directory"}), 404
+
+    entry = random.choice(entries)
+    folder_name = entry.name
+
+    match = re.match(r'^(.+?)\s*\((\d{4})\)', folder_name)
+    title = match.group(1).strip() if match else folder_name
+    year = match.group(2) if match else None
+
+    search_type = "movie" if overlay_type == "movies" else "tv"
+    params = {"api_key": TMDB_API_KEY, "query": title}
+    if year:
+        params["year"] = year
+
+    try:
+        resp = http_requests.get(
+            f"https://api.themoviedb.org/3/search/{search_type}",
+            params=params, timeout=10
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+    except Exception as e:
+        return jsonify({"error": f"TMDB error: {e}"}), 500
+
+    if not results or not results[0].get("poster_path"):
+        return jsonify({"error": f"No poster found for '{title}'"}), 404
+
+    poster_url = f"https://image.tmdb.org/t/p/w500{results[0]['poster_path']}"
+    try:
+        img_resp = http_requests.get(poster_url, timeout=15)
+        img_resp.raise_for_status()
+        img = Image.open(io.BytesIO(img_resp.content)).convert("RGBA")
+    except Exception as e:
+        return jsonify({"error": f"Poster download error: {e}"}), 500
+
+    draw = ImageDraw.Draw(img)
+    w, h = img.size
+
+    # Semi-transparent bottom bar with folder title
+    bar_h = 64
+    bar = Image.new("RGBA", (w, bar_h), (0, 0, 0, 190))
+    img.paste(bar, (0, h - bar_h), bar)
+    draw = ImageDraw.Draw(img)
+    draw.text((12, h - bar_h + 10), folder_name[:60], fill=(255, 255, 255, 230))
+
+    # "KOMETA TEST" badge at top-right
+    badge_text = "KOMETA TEST"
+    badge_w, badge_h = 124, 28
+    bx = w - badge_w - 10
+    by = 10
+    try:
+        draw.rounded_rectangle([bx, by, bx + badge_w, by + badge_h], radius=6, fill=(124, 58, 237, 220))
+    except AttributeError:
+        draw.rectangle([bx, by, bx + badge_w, by + badge_h], fill=(124, 58, 237, 220))
+    draw.text((bx + 8, by + 6), badge_text, fill=(255, 255, 255, 255))
+
+    out = io.BytesIO()
+    img.convert("RGB").save(out, format="PNG")
+    out.seek(0)
+
+    response = Response(out.read(), mimetype="image/png")
+    response.headers["X-Item-Name"] = folder_name
+    return response
 
 
 if __name__ == "__main__":

@@ -336,3 +336,30 @@ header h1 {
 .log-output::-webkit-scrollbar { width: 6px; }
 .log-output::-webkit-scrollbar-track { background: transparent; }
 .log-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Kometa extras ── */
+.config-path-row {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.config-path {
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+.test-btn {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: #1e293b;
+  border: 1px solid #7c3aed;
+  border-radius: 5px;
+  color: #a78bfa;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.test-btn:hover { background: #2d1f5e; }
