@@ -91,7 +91,7 @@ ssh pwu "cd /mnt/user/appdata/pwMediaManager && git pull && docker compose up -d
 
 ## Port
 
-Web-UI erreichbar unter: `http://<unraid-ip>:8080`
+Web-UI erreichbar unter: `http://<unraid-ip>:8082`
 
 ## Architektur
 

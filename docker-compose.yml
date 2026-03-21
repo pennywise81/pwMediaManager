@@ -4,7 +4,7 @@ services:
     container_name: pwMediaManager
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8082:8080"
     volumes:
       # Scripts (read-only mounts from their git repos)
       - /mnt/user/Fileserver/scripts/pwMediaEnhancer:/scripts/pwMediaEnhancer:ro
