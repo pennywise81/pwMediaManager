@@ -83,11 +83,15 @@ header h1 {
 .tool-name {
   white-space: nowrap;
 }
-.tool-label {
+.tool-label a.readme-link {
+  color: var(--accent);
+  text-decoration: none;
   font-weight: 600;
   font-size: 1rem;
-  color: var(--accent);
-  display: block;
+}
+.tool-label a.readme-link:hover {
+  text-decoration: underline;
+  opacity: 0.85;
 }
 .status-badge {
   font-size: 0.85rem;

@@ -20,6 +20,7 @@ SCRIPTS = {
     "pwMediaEnhancer": {
         "label":       "pwMediaEnhancer",
         "description": "Sortiert und benennt Filme & Serien nach Plex-Standard um.",
+        "readme_url":  "https://github.com/pennywise81/pwMediaEnhancer#readme",
         "script":      "/scripts/pwMediaEnhancer/pwMediaEnhancer.sh",
         "log_prefix":  "pwMediaEnhancer",
         "params": [
@@ -34,6 +35,7 @@ SCRIPTS = {
     "pwPosterDownloader": {
         "label":       "pwPosterDownloader",
         "description": "Lädt Poster von ThePosterDB & fanart.tv und lädt sie in Plex hoch.",
+        "readme_url":  "https://github.com/pennywise81/pwPosterDownloader#readme",
         "script":      "/scripts/pwPosterDownloader/pwPosterDownloader.sh",
         "log_prefix":  "pwPosterDownloader",
         "params": [

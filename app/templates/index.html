@@ -29,7 +29,11 @@
           {% for key, cfg in scripts.items() %}
           <tr id="row-{{ key }}">
             <td class="tool-name">
-              <span class="tool-label">{{ cfg.label }}</span>
+              <span class="tool-label">
+                <a href="{{ cfg.readme_url }}" target="_blank" class="readme-link" title="README auf GitHub">
+                  {{ cfg.label }} 📖
+                </a>
+              </span>
               <span class="status-badge" id="badge-{{ key }}"></span>
             </td>
             <td class="tool-desc">{{ cfg.description }}</td>
