@@ -85,8 +85,18 @@ Die Konfiguration erfolgt ausschließlich über Volumes in `docker-compose.yml`.
 
 ## Update
 
+Code-Änderungen werden sofort wirksam — die App ist als Volume eingebunden, kein Rebuild nötig:
+
 ```bash
-ssh pwu "cd /mnt/user/appdata/pwMediaManager && git pull && docker compose up -d --build"
+# Auf Unraid: neue App-Dateien einspielen und Container neu starten
+scp -r app/ pwu:/mnt/user/appdata/pwMediaManager/app/
+ssh pwu "docker restart pwMediaManager"
+```
+
+Für Änderungen an `Dockerfile` oder `requirements.txt` (neue Python-Pakete):
+
+```bash
+ssh pwu "cd /mnt/user/appdata/pwMediaManager && docker compose up -d --build"
 ```
 
 ## Port

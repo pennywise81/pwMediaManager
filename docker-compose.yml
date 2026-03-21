@@ -6,6 +6,8 @@ services:
     ports:
       - "8082:8080"
     volumes:
+      # App source (live-mounted: no rebuild needed after code changes)
+      - /mnt/user/appdata/pwMediaManager/app:/app
       # Scripts (read-only mounts from their git repos)
       - /mnt/user/Fileserver/scripts/pwMediaEnhancer:/scripts/pwMediaEnhancer:ro
       - /mnt/user/Fileserver/scripts/pwPosterDownloader:/scripts/pwPosterDownloader:ro
@@ -13,7 +15,7 @@ services:
       - /boot/config/pwMediaEnhancer.conf:/boot/config/pwMediaEnhancer.conf:ro
       # Media directories (pwMediaEnhancer needs write access to move files)
       - /mnt/user/Fileserver:/fileserver
-      # Log output
+      # Log output + persisted settings
       - /mnt/user/appdata/pwMediaManager/logs:/logs
     environment:
       - LOGS_DIR=/logs
