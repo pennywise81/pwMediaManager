@@ -26,11 +26,22 @@ SCRIPTS = {
         "params": [
             {"id": "dry_run",  "flag": "--dry-run",  "label": "Dry-Run (keine Änderungen)"},
         ],
-        "positional": {
-            "id":      "source_dir",
-            "label":   "Quellverzeichnis",
-            "default": "/fileserver",
-        },
+        "dir_inputs": [
+            {
+                "id":      "movies_dir",
+                "flag":    "--movies",
+                "label":   "Filme-Verzeichnis",
+                "default": "/fileserver/Filme",
+                "help":    "Pfad zum Ordner, der die Filmordner enthält. Jeder Unterordner ist ein Film im Format 'Titel (Jahr)'.",
+            },
+            {
+                "id":      "series_dir",
+                "flag":    "--series",
+                "label":   "Serien-Verzeichnis",
+                "default": "/fileserver/Serien",
+                "help":    "Pfad zum Ordner, der die Serienordner enthält. Jeder Unterordner ist eine Serie mit Season-Unterordnern.",
+            },
+        ],
     },
     "pwPosterDownloader": {
         "label":       "pwPosterDownloader",
@@ -50,6 +61,23 @@ SCRIPTS = {
 
 LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/logs"))
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+SETTINGS_FILE = LOGS_DIR / "pwmediamanager-settings.json"
+
+
+def load_settings() -> dict:
+    if SETTINGS_FILE.exists():
+        try:
+            return json.loads(SETTINGS_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def save_settings(data: dict):
+    merged = load_settings()
+    merged.update(data)
+    SETTINGS_FILE.write_text(json.dumps(merged, indent=2))
 
 # ── Job state ─────────────────────────────────────────────────────────────────
 
@@ -109,7 +137,9 @@ def index():
     with jobs_lock:
         current_jobs = {jid: dict(j) for jid, j in jobs.items()}
 
-    return render_template("index.html", scripts=SCRIPTS, log_files=log_files, jobs=current_jobs)
+    settings = load_settings()
+    return render_template("index.html", scripts=SCRIPTS, log_files=log_files,
+                           jobs=current_jobs, settings=settings)
 
 
 @app.route("/run/<tool>", methods=["POST"])
@@ -120,15 +150,26 @@ def run_tool(tool):
     cfg = SCRIPTS[tool]
     cmd = ["bash", cfg["script"]]
 
-    # Flags
+    # Flags (checkboxes)
     for param in cfg.get("params", []):
         if request.form.get(param["id"]):
             cmd.append(param["flag"])
 
-    # Positional argument
+    # Directory inputs (pwMediaEnhancer: --movies DIR --series DIR)
+    tool_settings = {}
+    for di in cfg.get("dir_inputs", []):
+        val = request.form.get(di["id"], di["default"]).strip() or di["default"]
+        cmd += [di["flag"], val]
+        tool_settings[f"{tool}_{di['id']}"] = val
+
+    # Legacy positional argument (other tools)
     if "positional" in cfg:
         val = request.form.get(cfg["positional"]["id"], cfg["positional"]["default"])
         cmd.append(val)
+
+    # Persist directory settings
+    if tool_settings:
+        save_settings(tool_settings)
 
     # Create log file
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -213,6 +254,14 @@ def view_log(filename):
 def api_jobs():
     with jobs_lock:
         return jsonify({jid: dict(j) for jid, j in jobs.items()})
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def api_settings():
+    if request.method == "POST":
+        save_settings(request.json or {})
+        return jsonify({"ok": True})
+    return jsonify(load_settings())
 
 
 if __name__ == "__main__":

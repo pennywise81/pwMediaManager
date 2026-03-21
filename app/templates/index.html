@@ -45,7 +45,23 @@
                   {{ param.label }}
                 </label>
                 {% endfor %}
-                {% if cfg.positional is defined %}
+                {% if cfg.dir_inputs is defined %}
+                  {% for di in cfg.dir_inputs %}
+                  <div class="dir-group">
+                    <label class="param-label param-input">
+                      {{ di.label }}
+                      <span class="help-icon" title="{{ di.help }}">ⓘ</span>
+                      <input type="text"
+                             name="{{ di.id }}"
+                             value="{{ settings.get(key + '_' + di.id, di.default) }}"
+                             class="dir-input"
+                             data-setting-key="{{ key }}_{{ di.id }}"
+                             onchange="saveSetting('{{ key }}_{{ di.id }}', this.value)">
+                    </label>
+                    <p class="help-text">{{ di.help }}</p>
+                  </div>
+                  {% endfor %}
+                {% elif cfg.positional is defined %}
                 <label class="param-label param-input">
                   {{ cfg.positional.label }}:
                   <input type="text" name="{{ cfg.positional.id }}"
@@ -101,6 +117,16 @@
   <script>
     let currentSource = null;
     let currentJobId = null;
+
+    function saveSetting(key, value) {
+      const data = {};
+      data[key] = value;
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+    }
 
     function runTool(tool, form) {
       const data = new FormData(form);
