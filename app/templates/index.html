@@ -47,6 +47,7 @@
                   <input type="checkbox" name="{{ param.id }}" value="1"
                          onchange="updateCmd('{{ key }}')">
                   {{ param.label }}
+                  <span class="param-flag">{{ param.flag }}</span>
                 </label>
                 {% endfor %}
                 {% if cfg.radio_groups is defined %}
@@ -59,6 +60,7 @@
                              {% if loop.first %}checked{% endif %}
                              onchange="updateCmd('{{ key }}')">
                       {{ opt.label }}
+                      {% if opt.value %}<span class="param-flag">{{ opt.value }}</span>{% endif %}
                     </label>
                     {% endfor %}
                   </div>

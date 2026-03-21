@@ -200,6 +200,14 @@ header h1 {
   cursor: pointer;
 }
 
+.param-flag {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  margin-left: 0.3rem;
+  opacity: 0.7;
+}
+
 /* Command preview */
 .cmd-preview {
   margin-top: 0.7rem;

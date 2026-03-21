@@ -50,7 +50,20 @@ SCRIPTS = {
         "host_script": "/mnt/user/Fileserver/scripts/pwMediaEnhancer/pwMediaEnhancer.sh",
         "log_prefix":  "pwMediaEnhancer",
         "params": [
-            {"id": "dry_run",  "flag": "--dry-run",  "label": "Dry-Run (keine Änderungen)"},
+            {"id": "dry_run",        "flag": "--dry-run",        "label": "Dry-Run (keine Änderungen)"},
+            {"id": "skip_existing",  "flag": "--skip-existing",  "label": "Nur neue Inhalte"},
+            {"id": "delete_empty",   "flag": "--delete-empty",   "label": "Leere Verzeichnisse löschen"},
+        ],
+        "radio_groups": [
+            {
+                "id": "content_filter",
+                "label": "Verarbeitung",
+                "options": [
+                    {"value": "",               "label": "Alle"},
+                    {"value": "--movies-only",  "label": "Nur Filme"},
+                    {"value": "--series-only",  "label": "Nur Serien"},
+                ],
+            },
         ],
         "dir_inputs": [
             {
