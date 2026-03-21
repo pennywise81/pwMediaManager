@@ -50,11 +50,20 @@ SCRIPTS = {
         "script":      "/scripts/pwPosterDownloader/pwPosterDownloader.sh",
         "log_prefix":  "pwPosterDownloader",
         "params": [
-            {"id": "dry_run",       "flag": "--dry-run",       "label": "Dry-Run (keine Downloads/Uploads)"},
-            {"id": "movies_only",   "flag": "--movies-only",   "label": "Nur Filme"},
-            {"id": "series_only",   "flag": "--series-only",   "label": "Nur Serien"},
-            {"id": "skip_existing", "flag": "--skip-existing", "label": "Nur neue Inhalte (skip existing)"},
+            {"id": "dry_run",       "flag": "--dry-run",          "label": "Dry-Run (keine Downloads/Uploads)"},
+            {"id": "skip_existing", "flag": "--skip-existing",    "label": "Nur neue Inhalte (skip existing)"},
             {"id": "plex_upload",   "flag": "--plex-upload-only", "label": "Nur Plex-Upload (kein Download)"},
+        ],
+        "radio_groups": [
+            {
+                "id": "content_filter",
+                "label": "Inhaltsfilter",
+                "options": [
+                    {"value": "",              "label": "Alle"},
+                    {"value": "--movies-only", "label": "Nur Filme"},
+                    {"value": "--series-only", "label": "Nur Serien"},
+                ],
+            },
         ],
         "dir_inputs": [
             {

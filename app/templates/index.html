@@ -49,6 +49,21 @@
                   {{ param.label }}
                 </label>
                 {% endfor %}
+                {% if cfg.radio_groups is defined %}
+                  {% for rg in cfg.radio_groups %}
+                  <div class="radio-group">
+                    <span class="radio-group-label">{{ rg.label }}:</span>
+                    {% for opt in rg.options %}
+                    <label class="param-label param-radio">
+                      <input type="radio" name="{{ rg.id }}" value="{{ opt.value }}"
+                             {% if loop.first %}checked{% endif %}
+                             onchange="updateCmd('{{ key }}')">
+                      {{ opt.label }}
+                    </label>
+                    {% endfor %}
+                  </div>
+                  {% endfor %}
+                {% endif %}
                 {% if cfg.dir_inputs is defined %}
                   {% for di in cfg.dir_inputs %}
                   <div class="dir-group">
@@ -136,6 +151,10 @@
       for (const p of cfg.params || []) {
         const cb = form.querySelector(`[name="${p.id}"]`);
         if (cb && cb.checked) parts.push(p.flag);
+      }
+      for (const rg of cfg.radio_groups || []) {
+        const sel = form.querySelector(`[name="${rg.id}"]:checked`);
+        if (sel && sel.value) parts.push(sel.value);
       }
       for (const di of cfg.dir_inputs || []) {
         const inp = form.querySelector(`[name="${di.id}"]`);

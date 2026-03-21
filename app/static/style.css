@@ -170,6 +170,36 @@ header h1 {
   display: block;
 }
 
+.radio-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.radio-group-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-right: 0.3rem;
+  white-space: nowrap;
+}
+.param-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  margin-top: 0;
+}
+.param-radio input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 /* Command preview */
 .cmd-preview {
   margin-top: 0.7rem;
