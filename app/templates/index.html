@@ -145,7 +145,7 @@
       const el   = document.getElementById('cmd-' + tool);
       if (!el || !form) return;
 
-      const scriptName = cfg.script.split('/').pop();
+      const scriptName = cfg.script;
       let parts = ['bash', scriptName];
 
       for (const p of cfg.params || []) {
