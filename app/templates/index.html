@@ -55,10 +55,8 @@
                              name="{{ di.id }}"
                              value="{{ settings.get(key + '_' + di.id, di.default) }}"
                              class="dir-input"
-                             data-setting-key="{{ key }}_{{ di.id }}"
                              onchange="saveSetting('{{ key }}_{{ di.id }}', this.value)">
                     </label>
-                    <p class="help-text">{{ di.help }}</p>
                   </div>
                   {% endfor %}
                 {% elif cfg.positional is defined %}
