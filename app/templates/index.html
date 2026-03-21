@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pwMediaManager</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>⚙️ pwMediaManager</h1>
+    <p class="subtitle">Steuerung für pwMediaEnhancer &amp; pwPosterDownloader</p>
+  </header>
+
+  <main>
+    <!-- ── Tools Table ── -->
+    <section class="tools-section">
+      <table class="tools-table">
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th>Beschreibung</th>
+            <th>Parameter</th>
+            <th>Aktion</th>
+            <th>Logs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for key, cfg in scripts.items() %}
+          <tr id="row-{{ key }}">
+            <td class="tool-name">
+              <span class="tool-label">{{ cfg.label }}</span>
+              <span class="status-badge" id="badge-{{ key }}"></span>
+            </td>
+            <td class="tool-desc">{{ cfg.description }}</td>
+            <td class="tool-params">
+              <form id="form-{{ key }}" onsubmit="return runTool('{{ key }}', this)">
+                {% for param in cfg.params %}
+                <label class="param-label">
+                  <input type="checkbox" name="{{ param.id }}" value="1">
+                  {{ param.label }}
+                </label>
+                {% endfor %}
+                {% if cfg.positional is defined %}
+                <label class="param-label param-input">
+                  {{ cfg.positional.label }}:
+                  <input type="text" name="{{ cfg.positional.id }}"
+                         value="{{ cfg.positional.default }}" class="dir-input">
+                </label>
+                {% endif %}
+              </form>
+            </td>
+            <td class="tool-action">
+              <button class="run-btn" id="btn-{{ key }}"
+                      onclick="runTool('{{ key }}', document.getElementById('form-{{ key }}'))">
+                ▶ Starten
+              </button>
+            </td>
+            <td class="tool-logs">
+              {% if log_files[key] %}
+                <ul class="log-list">
+                  {% for lf in log_files[key] %}
+                  <li>
+                    <a href="/logs/{{ lf }}" target="_blank" class="log-link">
+                      📄 {{ lf }}
+                    </a>
+                  </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="no-logs">Keine Logs vorhanden</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ── Live Log Panel ── -->
+    <section class="log-section" id="log-panel" style="display:none">
+      <div class="log-header">
+        <h2 id="log-title">Live-Ausgabe</h2>
+        <div class="log-controls">
+          <label>
+            <input type="checkbox" id="auto-scroll" checked>
+            Auto-Scroll
+          </label>
+          <button onclick="clearLog()">Leeren</button>
+          <button onclick="closeLog()">✕ Schließen</button>
+        </div>
+      </div>
+      <pre id="log-output" class="log-output"></pre>
+    </section>
+  </main>
+
+  <script>
+    let currentSource = null;
+    let currentJobId = null;
+
+    function runTool(tool, form) {
+      const data = new FormData(form);
+
+      // Disable button while running
+      const btn = document.getElementById('btn-' + tool);
+      btn.disabled = true;
+      btn.textContent = '⏳ Läuft…';
+
+      setBadge(tool, 'running');
+      openLogPanel(tool);
+
+      fetch('/run/' + tool, { method: 'POST', body: data })
+        .then(r => r.json())
+        .then(result => {
+          if (result.error) {
+            appendLog('FEHLER: ' + result.error);
+            resetButton(tool);
+            return;
+          }
+
+          currentJobId = result.job_id;
+          document.getElementById('log-title').textContent =
+            'Live-Ausgabe – ' + tool + ' (' + result.log_name + ')';
+
+          // SSE stream
+          if (currentSource) currentSource.close();
+          currentSource = new EventSource('/stream/' + result.job_id);
+
+          currentSource.onmessage = e => {
+            appendLog(JSON.parse(e.data));
+          };
+
+          currentSource.addEventListener('done', e => {
+            const status = e.data;
+            appendLog('\n── Abgeschlossen (' + status + ') ──');
+            currentSource.close();
+            currentSource = null;
+            setBadge(tool, status);
+            resetButton(tool);
+            refreshLogList(tool, result.log_name);
+          });
+
+          currentSource.onerror = () => {
+            appendLog('\n── Verbindung unterbrochen ──');
+            currentSource.close();
+            resetButton(tool);
+          };
+        })
+        .catch(err => {
+          appendLog('FEHLER: ' + err);
+          resetButton(tool);
+        });
+
+      return false;
+    }
+
+    function appendLog(line) {
+      const out = document.getElementById('log-output');
+      out.textContent += line + '\n';
+      if (document.getElementById('auto-scroll').checked) {
+        out.scrollTop = out.scrollHeight;
+      }
+    }
+
+    function openLogPanel(tool) {
+      const panel = document.getElementById('log-panel');
+      panel.style.display = 'block';
+      document.getElementById('log-output').textContent = '';
+      document.getElementById('log-title').textContent = 'Live-Ausgabe – ' + tool;
+      panel.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function closeLog() {
+      if (currentSource) { currentSource.close(); currentSource = null; }
+      document.getElementById('log-panel').style.display = 'none';
+    }
+
+    function clearLog() {
+      document.getElementById('log-output').textContent = '';
+    }
+
+    function setBadge(tool, status) {
+      const badge = document.getElementById('badge-' + tool);
+      const map = { running: ['⏳', 'badge-running'], done: ['✅', 'badge-done'], error: ['❌', 'badge-error'] };
+      if (map[status]) {
+        badge.textContent = map[status][0];
+        badge.className = 'status-badge ' + map[status][1];
+      } else {
+        badge.textContent = '';
+        badge.className = 'status-badge';
+      }
+    }
+
+    function resetButton(tool) {
+      const btn = document.getElementById('btn-' + tool);
+      btn.disabled = false;
+      btn.textContent = '▶ Starten';
+    }
+
+    function refreshLogList(tool, newLogName) {
+      const cell = document.querySelector('#row-' + tool + ' .tool-logs');
+      const ul = cell.querySelector('ul.log-list') || (() => {
+        cell.innerHTML = '';
+        const u = document.createElement('ul');
+        u.className = 'log-list';
+        cell.appendChild(u);
+        return u;
+      })();
+
+      // Prepend new log link
+      const li = document.createElement('li');
+      li.innerHTML = '<a href="/logs/' + newLogName + '" target="_blank" class="log-link">📄 ' + newLogName + '</a>';
+      ul.insertBefore(li, ul.firstChild);
+
+      // Keep max 10
+      while (ul.children.length > 10) ul.removeChild(ul.lastChild);
+    }
+  </script>
+</body>
+</html>

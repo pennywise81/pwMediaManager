@@ -1,0 +1,20 @@
+services:
+  pwmediamanager:
+    build: .
+    container_name: pwMediaManager
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Scripts (read-only mounts from their git repos)
+      - /mnt/user/Fileserver/scripts/pwMediaEnhancer:/scripts/pwMediaEnhancer:ro
+      - /mnt/user/Fileserver/scripts/pwPosterDownloader:/scripts/pwPosterDownloader:ro
+      # Config for both scripts
+      - /boot/config/pwMediaEnhancer.conf:/boot/config/pwMediaEnhancer.conf:ro
+      # Media directories (pwMediaEnhancer needs write access to move files)
+      - /mnt/user/Fileserver:/fileserver
+      # Log output
+      - /mnt/user/appdata/pwMediaManager/logs:/logs
+    environment:
+      - LOGS_DIR=/logs
+      - PWMEDIAENHANCER_CONFIG=/boot/config/pwMediaEnhancer.conf
