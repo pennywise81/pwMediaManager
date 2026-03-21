@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>pwMediaManager</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    const TOOL_CONFIGS = {{ scripts | tojson }};
+    document.addEventListener('DOMContentLoaded', initCmds);
+  </script>
 </head>
 <body>
   <header>
@@ -41,7 +45,8 @@
               <form id="form-{{ key }}" onsubmit="return runTool('{{ key }}', this)">
                 {% for param in cfg.params %}
                 <label class="param-label">
-                  <input type="checkbox" name="{{ param.id }}" value="1">
+                  <input type="checkbox" name="{{ param.id }}" value="1"
+                         onchange="updateCmd('{{ key }}')">
                   {{ param.label }}
                 </label>
                 {% endfor %}
@@ -49,13 +54,16 @@
                   {% for di in cfg.dir_inputs %}
                   <div class="dir-group">
                     <label class="param-label param-input">
-                      {{ di.label }}
-                      <span class="help-icon" title="{{ di.help }}">ⓘ</span>
+                      <span class="label-row">
+                        {{ di.label }}
+                        <span class="tooltip-wrap">ⓘ<span class="tooltip-box">{{ di.help }}</span></span>
+                      </span>
                       <input type="text"
                              name="{{ di.id }}"
                              value="{{ settings.get(key + '_' + di.id, di.default) }}"
                              class="dir-input"
-                             onchange="saveSetting('{{ key }}_{{ di.id }}', this.value)">
+                             onchange="saveSetting('{{ key }}_{{ di.id }}', this.value); updateCmd('{{ key }}')"
+                             oninput="updateCmd('{{ key }}')">
                     </label>
                   </div>
                   {% endfor %}
@@ -67,6 +75,7 @@
                 </label>
                 {% endif %}
               </form>
+              <div class="cmd-preview" id="cmd-{{ key }}"></div>
             </td>
             <td class="tool-action">
               <button class="run-btn" id="btn-{{ key }}"
@@ -115,6 +124,31 @@
   <script>
     let currentSource = null;
     let currentJobId = null;
+
+    function updateCmd(tool) {
+      const cfg = TOOL_CONFIGS[tool];
+      const form = document.getElementById('form-' + tool);
+      const el   = document.getElementById('cmd-' + tool);
+      if (!el || !form) return;
+
+      const scriptName = cfg.script.split('/').pop();
+      let parts = ['bash', scriptName];
+
+      for (const p of cfg.params || []) {
+        const cb = form.querySelector(`[name="${p.id}"]`);
+        if (cb && cb.checked) parts.push(p.flag);
+      }
+      for (const di of cfg.dir_inputs || []) {
+        const inp = form.querySelector(`[name="${di.id}"]`);
+        const val = (inp && inp.value.trim()) ? inp.value.trim() : di.default;
+        parts.push(di.flag, val);
+      }
+      el.textContent = parts.join(' ');
+    }
+
+    function initCmds() {
+      for (const tool of Object.keys(TOOL_CONFIGS)) updateCmd(tool);
+    }
 
     function saveSetting(key, value) {
       const data = {};

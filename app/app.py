@@ -56,6 +56,22 @@ SCRIPTS = {
             {"id": "skip_existing", "flag": "--skip-existing", "label": "Nur neue Inhalte (skip existing)"},
             {"id": "plex_upload",   "flag": "--plex-upload-only", "label": "Nur Plex-Upload (kein Download)"},
         ],
+        "dir_inputs": [
+            {
+                "id":      "movies_dir",
+                "flag":    "--movies-dir",
+                "label":   "Filme-Verzeichnis",
+                "default": "/fileserver/Filme",
+                "help":    "Pfad zum Ordner mit den Filmordnern, z. B. /mnt/user/Fileserver/Filme. Jeder Unterordner ist ein Film im Format 'Titel (Jahr) {imdb-ttXXX}'.",
+            },
+            {
+                "id":      "series_dir",
+                "flag":    "--series-dir",
+                "label":   "Serien-Verzeichnis",
+                "default": "/fileserver/Serien",
+                "help":    "Pfad zum Ordner mit den Serienordnern, z. B. /mnt/user/Fileserver/Serien. Jeder Unterordner ist eine Serie mit Season-Unterordnern.",
+            },
+        ],
     },
 }
 
