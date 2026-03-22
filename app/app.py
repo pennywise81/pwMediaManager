@@ -129,7 +129,7 @@ SCRIPTS = {
         "script":      "/scripts/pwKometaManager/pwKometaManager.sh",
         "host_script": "/mnt/user/Fileserver/scripts/pwKometaManager/pwKometaManager.sh",
         "log_prefix":  "pwKometaManager",
-        "config_path": "/mnt/user/appdata/kometa/config/config.yaml",
+        "config_path": "/mnt/user/appdata/kometa/config/config.yml",
         "params": [
             {"id": "dry_run", "flag": "--dry-run", "label": "Dry-Run"},
         ],
