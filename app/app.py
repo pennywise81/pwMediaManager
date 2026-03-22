@@ -454,17 +454,25 @@ def delete_posters():
 def test_overlay():
     data = request.json or {}
     tool         = data.get("tool", "pwKometaManager")
-    overlay_type = data.get("type", "movies")
+    overlay_type = data.get("type", "movies")   # movies / series / episode
+    is_episode   = overlay_type == "episode"
 
     cfg = SCRIPTS.get(tool)
     if not cfg:
         return jsonify({"error": "unknown tool"}), 404
 
-    settings  = load_settings()
-    dir_key   = "movies_dir" if overlay_type == "movies" else "series_dir"
-    section_id = 1 if overlay_type == "movies" else 2
-    default_dir = "/fileserver/Filme" if overlay_type == "movies" else "/fileserver/Serien"
-    base_dir  = settings.get(f"{tool}_{dir_key}", default_dir)
+    settings   = load_settings()
+    series_dir = settings.get(f"{tool}_series_dir", "/fileserver/Serien")
+    movies_dir = settings.get(f"{tool}_movies_dir", "/fileserver/Filme")
+
+    if overlay_type == "movies":
+        base_dir   = movies_dir
+        section_id = 1
+        tag_elem   = "Video"
+    else:
+        base_dir   = series_dir
+        section_id = 2
+        tag_elem   = "Directory"
 
     # 1. Pick a random folder
     try:
@@ -476,12 +484,10 @@ def test_overlay():
 
     entry       = random.choice(entries)
     folder_name = entry.name
-    # Extract title (strip year and imdb suffix)
     match = re.match(r'^(.+?)\s*\(\d{4}\)', folder_name)
     title = match.group(1).strip() if match else re.sub(r'\s*\{[^}]+\}', '', folder_name).strip()
 
-    # 2. Search Plex for the item
-    tag_elem = "Video" if overlay_type == "movies" else "Directory"
+    # 2. Search Plex for the show/movie
     try:
         resp = http_requests.get(
             f"{PLEX_URL}/library/sections/{section_id}/all",
@@ -497,39 +503,56 @@ def test_overlay():
     if item is None:
         return jsonify({"error": f"Item not found in Plex: '{title}'"}), 404
 
-    rating_key = item.get("ratingKey")
+    show_key = item.get("ratingKey")
 
-    # 3. Add "test" label to item
+    # 3a. For episode mode: pick a random episode
+    if is_episode:
+        try:
+            ep_resp = http_requests.get(
+                f"{PLEX_URL}/library/metadata/{show_key}/allLeaves",
+                params={"X-Plex-Token": PLEX_TOKEN},
+                timeout=15,
+            )
+            ep_resp.raise_for_status()
+            ep_root    = ET.fromstring(ep_resp.content)
+            episodes   = ep_root.findall(".//Video")
+            if not episodes:
+                return jsonify({"error": "No episodes found"}), 404
+            ep         = random.choice(episodes)
+            target_key = ep.get("ratingKey")
+            item_name  = f"{folder_name} – {ep.get('title', 'Episode')}"
+        except Exception as e:
+            return jsonify({"error": f"Episode fetch error: {e}"}), 500
+    else:
+        target_key = show_key
+        item_name  = folder_name
+
+    # 4. Add "test" label
     try:
         http_requests.put(
-            f"{PLEX_URL}/library/metadata/{rating_key}",
+            f"{PLEX_URL}/library/metadata/{target_key}",
             params={"label[0].tag.tag": "test", "X-Plex-Token": PLEX_TOKEN},
             timeout=10,
         )
     except Exception as e:
         return jsonify({"error": f"Plex label error: {e}"}), 500
 
-    # 4. Run Kometa with --run-tests --overlays-only
+    # 5. Run Kometa with --run-tests --overlays-only
     script_path = cfg.get("script", "/scripts/pwKometaManager/pwKometaManager.sh")
-    cmd = ["bash", script_path, "--run-tests", "--overlays-only"]
-    movies_dir = settings.get("pwKometaManager_movies_dir", "/fileserver/Filme")
-    series_dir = settings.get("pwKometaManager_series_dir", "/fileserver/Serien")
-    cmd += ["--movies-dir", movies_dir, "--series-dir", series_dir]
-
+    cmd = ["bash", script_path, "--run-tests", "--overlays-only",
+           "--movies-dir", movies_dir, "--series-dir", series_dir]
     try:
         subprocess.run(cmd, timeout=300, check=False,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        pass
-    except Exception as e:
-        # Best-effort: still try to return poster and clean up label
+    except (subprocess.TimeoutExpired, Exception):
         pass
 
-    # 5. Fetch the item's current poster from Plex
+    # 6. Fetch poster/thumb
+    thumb_path = "thumb" if not is_episode else "thumb"
     poster_data = None
     try:
         thumb_resp = http_requests.get(
-            f"{PLEX_URL}/library/metadata/{rating_key}/thumb",
+            f"{PLEX_URL}/library/metadata/{target_key}/thumb",
             params={"X-Plex-Token": PLEX_TOKEN},
             timeout=15,
         )
@@ -538,10 +561,10 @@ def test_overlay():
     except Exception:
         pass
 
-    # 6. Remove "test" label
+    # 7. Remove "test" label
     try:
         http_requests.put(
-            f"{PLEX_URL}/library/metadata/{rating_key}",
+            f"{PLEX_URL}/library/metadata/{target_key}",
             params={"label[0].tag.tag": "test", "label[0].tag.remove": "1",
                     "X-Plex-Token": PLEX_TOKEN},
             timeout=10,
@@ -550,10 +573,10 @@ def test_overlay():
         pass
 
     if not poster_data:
-        return jsonify({"error": "Could not fetch poster from Plex after Kometa run"}), 500
+        return jsonify({"error": "Could not fetch image from Plex after Kometa run"}), 500
 
     response = Response(poster_data, mimetype="image/jpeg")
-    response.headers["X-Item-Name"] = folder_name
+    response.headers["X-Item-Name"] = item_name
     return response
 
 

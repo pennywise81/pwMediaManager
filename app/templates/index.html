@@ -110,8 +110,12 @@
               <span class="delete-status" id="delete-status-{{ key }}"></span>
               {% endif %}
               {% if cfg.config_path is defined %}
-              <button class="test-btn" id="test-btn-{{ key }}"
-                      onclick="runTestOverlay('{{ key }}', this)">🎨 Test Overlay</button>
+              <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem">
+                <button class="test-btn" id="test-btn-poster-{{ key }}"
+                        onclick="runTestOverlay('{{ key }}', this, 'movies')">🎨 Poster Test</button>
+                <button class="test-btn" id="test-btn-episode-{{ key }}"
+                        onclick="runTestOverlay('{{ key }}', this, 'episode')">📺 Episode Test</button>
+              </div>
               {% endif %}
             </td>
             <td class="tool-logs">
@@ -328,11 +332,13 @@
       while (ul.children.length > 10) ul.removeChild(ul.lastChild);
     }
 
-    function runTestOverlay(tool, btn) {
-      const form = document.getElementById('form-' + tool);
-      const radios = form.querySelectorAll('[name="content_filter"]');
-      let type = 'movies';
-      radios.forEach(r => { if (r.checked && r.value === '--series-only') type = 'series'; });
+    function runTestOverlay(tool, btn, type) {
+      if (!type) {
+        const form = document.getElementById('form-' + tool);
+        const radios = form.querySelectorAll('[name="content_filter"]');
+        type = 'movies';
+        radios.forEach(r => { if (r.checked && r.value === '--series-only') type = 'series'; });
+      }
 
       const origText = btn.textContent;
       btn.disabled = true;
