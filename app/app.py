@@ -326,6 +326,7 @@ def stream(job_id):
         pos = 0
         batch = []
         last_flush = time.time()
+        last_heartbeat = time.time()
 
         while True:
             with jobs_lock:
@@ -347,6 +348,12 @@ def stream(job_id):
                 yield f"data: {json.dumps(batch)}\n\n"
                 batch = []
                 last_flush = now
+                last_heartbeat = now
+
+            # Keepalive comment every 15s to prevent proxy/browser timeout
+            elif not batch and (now - last_heartbeat >= 15):
+                yield ": keepalive\n\n"
+                last_heartbeat = now
 
             if is_done:
                 yield f"event: done\ndata: {status}\n\n"
