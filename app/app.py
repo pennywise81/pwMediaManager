@@ -198,7 +198,7 @@ def run_job(job_id: str, cmd: list[str], log_path: Path):
         jobs[job_id]["status"] = "running"
 
     try:
-        with open(log_path, "w") as lf:
+        with open(log_path, "w", encoding="utf-8", errors="replace") as lf:
             lf.write(f"# Started: {datetime.now().isoformat()}\n")
             lf.write(f"# Command: {' '.join(cmd)}\n\n")
             lf.flush()
@@ -333,7 +333,7 @@ def stream(job_id):
                 status = jobs.get(job_id, {}).get("status", "done")
 
             if log_path.exists():
-                with open(log_path) as f:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
                     f.seek(pos)
                     chunk = f.read()
                     if chunk:
