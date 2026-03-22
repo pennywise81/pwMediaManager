@@ -515,27 +515,55 @@ def delete_posters():
 
 def _build_test_overlay_config(lib_name: str, title: str, year: str | None,
                                is_episode: bool) -> str:
-    """Generate a minimal Kometa config that applies rating overlays to ONE item."""
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    """Generate a minimal Kometa config applying ALL overlays to ONE item only.
+    Uses flat filter syntax (no plex_search wrapper) — the correct syntax for
+    overlay_files item filters in Kometa."""
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
 
     if is_episode:
         filter_block = (
             "        filters:\n"
-            "          plex_search:\n"
-            "            all:\n"
-            f'              show_title.is: "{safe_title}"\n'
+            f'          show_title.is: "{safe_title}"\n'
         )
-        extra_tv = "          builder_level: episode\n"
     else:
-        year_line = f'              year: {year}\n' if year else ""
+        year_line = f"          year: {year}\n" if year else ""
         filter_block = (
             "        filters:\n"
-            "          plex_search:\n"
-            "            all:\n"
-            f'              title.is: "{safe_title}"\n'
+            f'          title.is: "{safe_title}"\n'
             f"{year_line}"
         )
-        extra_tv = ""
+
+    def overlay_entry(default: str, extra_tv: str = "") -> str:
+        return (
+            f"      - default: {default}\n"
+            f"        template_variables:\n"
+            f"{extra_tv}"
+            f"{filter_block}"
+        )
+
+    if is_episode:
+        overlays = (
+            overlay_entry("resolution",  "          builder_level: episode\n") +
+            overlay_entry("audio_codec", "          builder_level: episode\n") +
+            overlay_entry("ratings", (
+                "          builder_level: episode\n"
+                "          rating1: critic\n"
+                "          rating1_image: imdb\n"
+                "          horizontal_position: right\n"
+                "          vertical_position: bottom\n"
+            ))
+        )
+    else:
+        overlays = (
+            overlay_entry("resolution") +
+            overlay_entry("audio_codec") +
+            overlay_entry("ratings", (
+                "          rating1: critic\n"
+                "          rating1_image: imdb\n"
+                "          horizontal_position: right\n"
+                "          vertical_position: bottom\n"
+            ))
+        )
 
     return (
         f"plex:\n"
@@ -543,22 +571,14 @@ def _build_test_overlay_config(lib_name: str, title: str, year: str | None,
         f"  token: {PLEX_TOKEN}\n"
         f"  timeout: 60\n"
         f"  db_cache: 40\n"
+        f"  verify_ssl: false\n"
         f"tmdb:\n"
         f"  apikey: {TMDB_API_KEY}\n"
         f"  language: de\n"
         f"libraries:\n"
         f"  {lib_name}:\n"
         f"    overlay_files:\n"
-        f"      - pmm: ratings\n"
-        f"        template_variables:\n"
-        f"          rating1: critic\n"
-        f"          rating1_image: imdb\n"
-        f"          horizontal_align: right\n"
-        f"          vertical_align: bottom\n"
-        f"          horizontal_offset: 15\n"
-        f"          vertical_offset: 15\n"
-        f"{extra_tv}"
-        f"{filter_block}"
+        f"{overlays}"
     )
 
 
