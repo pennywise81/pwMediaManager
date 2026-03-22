@@ -94,8 +94,8 @@
               <div class="cmd-preview" id="cmd-{{ key }}"></div>
               {% if cfg.config_path is defined %}
               <div class="config-path-row">
-                <span class="config-path-label">config.yaml:</span>
-                <code class="config-path">{{ cfg.config_path }}</code>
+                <span class="config-path-label">config.yml:</span>
+                <code class="config-path" title="Klicken zum Kopieren" onclick="navigator.clipboard.writeText('nano {{ cfg.config_path }}'); this.title='Kopiert!'" style="cursor:pointer">nano {{ cfg.config_path }}</code>
               </div>
               {% endif %}
             </td>
