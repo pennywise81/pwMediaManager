@@ -18,7 +18,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, Response, jsonify, send_file, abort
 
 try:
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -509,13 +509,62 @@ def delete_posters():
     return jsonify({"deleted": deleted, "reset": reset, "errors": errors})
 
 
+def _composite_rating_badge(poster_bytes: bytes, rating: str | None) -> bytes:
+    """Overlay an IMDb-style rating badge (bottom-right) onto a poster image."""
+    if not PIL_AVAILABLE:
+        return poster_bytes
+    try:
+        img = Image.open(io.BytesIO(poster_bytes)).convert("RGBA")
+        w, h = img.size
+
+        font_size  = max(20, int(h * 0.034))
+        label_size = max(14, int(font_size * 0.65))
+        try:
+            font_main  = ImageFont.load_default(size=font_size)
+            font_label = ImageFont.load_default(size=label_size)
+        except TypeError:
+            font_main = font_label = ImageFont.load_default()
+
+        rating_text = f"{float(rating):.1f}" if rating else "N/A"
+
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw    = ImageDraw.Draw(overlay)
+
+        lbb = draw.textbbox((0, 0), "IMDb", font=font_label)
+        rbb = draw.textbbox((0, 0), rating_text, font=font_main)
+        lw, lh = lbb[2] - lbb[0], lbb[3] - lbb[1]
+        rw, rh = rbb[2] - rbb[0], rbb[3] - rbb[1]
+
+        pad_x, pad_y, gap = 12, 8, 10
+        badge_w = pad_x * 2 + lw + gap + rw
+        badge_h = pad_y * 2 + max(lh, rh)
+
+        x = w - badge_w - 15
+        y = h - badge_h - 15
+
+        draw.rounded_rectangle([x, y, x + badge_w, y + badge_h],
+                               radius=7, fill=(15, 15, 15, 215))
+
+        row_h = max(lh, rh)
+        draw.text((x + pad_x, y + pad_y + (row_h - lh) // 2),
+                  "IMDb", font=font_label, fill=(245, 197, 24, 255))
+        draw.text((x + pad_x + lw + gap, y + pad_y + (row_h - rh) // 2),
+                  rating_text, font=font_main, fill=(255, 255, 255, 255))
+
+        result = Image.alpha_composite(img, overlay)
+        out = io.BytesIO()
+        result.convert("RGB").save(out, format="JPEG", quality=95)
+        return out.getvalue()
+    except Exception:
+        return poster_bytes
+
+
 @app.route("/api/test-overlay", methods=["POST"])
 def test_overlay():
-    """Show current poster/thumb from Plex for a random item.
-    No Kometa run — displays the actual overlay result from the last real run."""
+    """Fetch a random poster/thumb from Plex and composite a rating badge preview."""
     data = request.json or {}
     tool         = data.get("tool", "pwKometaManager")
-    overlay_type = data.get("type", "movies")   # movies / series / episode
+    overlay_type = data.get("type", "movies")   # movies / episode
     is_episode   = overlay_type == "episode"
 
     cfg = SCRIPTS.get(tool)
@@ -526,16 +575,12 @@ def test_overlay():
     series_dir = settings.get(f"{tool}_series_dir", "/fileserver/Serien")
     movies_dir = settings.get(f"{tool}_movies_dir", "/fileserver/Filme")
 
-    if overlay_type == "movies":
-        base_dir   = movies_dir
-        section_id = 1
-        tag_elem   = "Video"
+    if is_episode:
+        base_dir, section_id, tag_elem = series_dir, 2, "Directory"
     else:
-        base_dir   = series_dir
-        section_id = 2
-        tag_elem   = "Directory"
+        base_dir, section_id, tag_elem = movies_dir, 1, "Video"
 
-    # 1. Pick a random folder
+    # 1. Pick a random folder from disk
     try:
         entries = [e for e in os.scandir(base_dir) if e.is_dir()]
     except Exception as e:
@@ -548,16 +593,22 @@ def test_overlay():
     match = re.match(r'^(.+?)\s*\(\d{4}\)', folder_name)
     title = match.group(1).strip() if match else re.sub(r'\s*\{[^}]+\}', '', folder_name).strip()
 
-    # 2. Search Plex for the show/movie
+    # 2. Fetch all items from the library and find by title match
     try:
         resp = http_requests.get(
             f"{PLEX_URL}/library/sections/{section_id}/all",
-            params={"title": title, "X-Plex-Token": PLEX_TOKEN},
+            params={"X-Plex-Token": PLEX_TOKEN},
             timeout=15,
         )
         resp.raise_for_status()
         root = ET.fromstring(resp.content)
-        item = root.find(f".//{tag_elem}")
+        items = root.findall(f".//{tag_elem}")
+        # Match by title (case-insensitive, partial)
+        title_lower = title.lower()
+        item = next(
+            (i for i in items if title_lower in (i.get("title") or "").lower()),
+            None
+        )
     except Exception as e:
         return jsonify({"error": f"Plex search error: {e}"}), 500
 
@@ -565,8 +616,9 @@ def test_overlay():
         return jsonify({"error": f"Item not found in Plex: '{title}'"}), 404
 
     show_key = item.get("ratingKey")
+    rating   = item.get("rating")  # IMDb rating after mass_critic_rating_update
 
-    # 3. For episode mode: pick a random episode
+    # 3. For episode mode: pick a random episode from the show
     if is_episode:
         try:
             ep_resp = http_requests.get(
@@ -581,28 +633,33 @@ def test_overlay():
                 return jsonify({"error": "No episodes found"}), 404
             ep         = random.choice(episodes)
             target_key = ep.get("ratingKey")
-            item_name  = f"{folder_name} – {ep.get('title', 'Episode')}"
+            ep_title   = ep.get("title", "Episode")
+            # Use show rating for episode badge (per-episode rating often missing)
+            if not rating:
+                rating = ep.get("rating")
+            # ASCII-safe header value
+            item_name = f"{folder_name} - {ep_title}".encode("ascii", "replace").decode("ascii")
         except Exception as e:
             return jsonify({"error": f"Episode fetch error: {e}"}), 500
     else:
         target_key = show_key
-        item_name  = folder_name
+        item_name  = folder_name.encode("ascii", "replace").decode("ascii")
 
-    # 4. Fetch current poster/thumb from Plex (no Kometa run, no Plex modifications)
-    poster_data = None
+    # 4. Fetch thumb from Plex
     try:
         thumb_resp = http_requests.get(
             f"{PLEX_URL}/library/metadata/{target_key}/thumb",
             params={"X-Plex-Token": PLEX_TOKEN},
             timeout=15,
         )
-        if thumb_resp.ok:
-            poster_data = thumb_resp.content
-    except Exception:
-        pass
+        if not thumb_resp.ok:
+            return jsonify({"error": "Could not fetch image from Plex"}), 500
+        poster_data = thumb_resp.content
+    except Exception as e:
+        return jsonify({"error": f"Thumb fetch error: {e}"}), 500
 
-    if not poster_data:
-        return jsonify({"error": "Could not fetch image from Plex"}), 500
+    # 5. Composite rating badge (IMDb-style, bottom-right)
+    poster_data = _composite_rating_badge(poster_data, rating)
 
     response = Response(poster_data, mimetype="image/jpeg")
     response.headers["X-Item-Name"] = item_name
