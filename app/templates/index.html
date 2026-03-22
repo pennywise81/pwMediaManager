@@ -156,6 +156,13 @@
     </section>
   </main>
 
+  <!-- ── Overlay Preview Modal ── -->
+  <div id="overlay-modal" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:center;cursor:pointer">
+    <p id="overlay-modal-title" style="color:#fff;font-family:sans-serif;font-size:1.1rem;margin-bottom:1rem;max-width:90%"></p>
+    <img id="overlay-modal-img" src="" style="max-width:min(500px,90vw);max-height:80vh;border-radius:8px;box-shadow:0 4px 32px #000">
+    <p style="color:#aaa;font-size:.8rem;margin-top:.8rem">Klicken zum Schließen</p>
+  </div>
+
   <script>
     let currentSource = null;
     let currentJobId = null;
@@ -354,10 +361,10 @@
         return r.blob().then(blob => ({blob, name}));
       }).then(({blob, name}) => {
         const imgUrl = URL.createObjectURL(blob);
-        const html = `<html><body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh"><h2 style="color:#fff;font-family:sans-serif;padding:1rem">${name}</h2><img src="${imgUrl}" style="max-width:500px;border-radius:8px;box-shadow:0 4px 32px #000"></body></html>`;
-        const pageBlob = new Blob([html], {type: 'text/html'});
-        const pageUrl = URL.createObjectURL(pageBlob);
-        window.open(pageUrl, '_blank');
+        const modal = document.getElementById('overlay-modal');
+        document.getElementById('overlay-modal-title').textContent = name;
+        document.getElementById('overlay-modal-img').src = imgUrl;
+        modal.style.display = 'flex';
       }).catch(e => alert('Fehler: ' + e.message))
         .finally(() => { btn.disabled = false; btn.textContent = origText; });
     }
