@@ -520,17 +520,19 @@ def test_overlay():
                 return jsonify({"error": "No episodes found"}), 404
             ep         = random.choice(episodes)
             target_key = ep.get("ratingKey")
+            label_key  = show_key   # label goes on the SHOW so Kometa processes it
             item_name  = f"{folder_name} – {ep.get('title', 'Episode')}"
         except Exception as e:
             return jsonify({"error": f"Episode fetch error: {e}"}), 500
     else:
         target_key = show_key
+        label_key  = show_key
         item_name  = folder_name
 
-    # 4. Add "test" label
+    # 4. Add "test" label (always on the show/movie, not on episode)
     try:
         http_requests.put(
-            f"{PLEX_URL}/library/metadata/{target_key}",
+            f"{PLEX_URL}/library/metadata/{label_key}",
             params={"label[0].tag.tag": "test", "X-Plex-Token": PLEX_TOKEN},
             timeout=10,
         )
@@ -561,10 +563,10 @@ def test_overlay():
     except Exception:
         pass
 
-    # 7. Remove "test" label
+    # 7. Remove "test" label (from show/movie)
     try:
         http_requests.put(
-            f"{PLEX_URL}/library/metadata/{target_key}",
+            f"{PLEX_URL}/library/metadata/{label_key}",
             params={"label[0].tag.tag": "test", "label[0].tag.remove": "1",
                     "X-Plex-Token": PLEX_TOKEN},
             timeout=10,
