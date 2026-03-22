@@ -74,6 +74,44 @@ SCRIPTS = {
             },
         ],
     },
+    "pwPosterSync": {
+        "label":       "pwPosterSync",
+        "description": "Lädt die aktuell in Plex ausgewählten Poster herunter und speichert sie als poster.jpg im jeweiligen Ordner.",
+        "readme_url":  "https://github.com/pennywise81/pwPosterSync#readme",
+        "script":      "/scripts/pwPosterSync/pwPosterSync.py",
+        "host_script": "/mnt/user/Fileserver/scripts/pwPosterSync/pwPosterSync.py",
+        "log_prefix":  "pwPosterSync",
+        "params": [
+            {"id": "dry_run", "flag": "--dry-run", "label": "Dry-Run (nichts schreiben)"},
+        ],
+        "radio_groups": [
+            {
+                "id": "content_filter",
+                "label": "Inhaltsfilter",
+                "options": [
+                    {"value": "",              "label": "Alle"},
+                    {"value": "--movies-only", "label": "Nur Filme"},
+                    {"value": "--series-only", "label": "Nur Serien"},
+                ],
+            },
+        ],
+        "dir_inputs": [
+            {
+                "id":      "movies_dir",
+                "flag":    "--movies-dir",
+                "label":   "Filme-Verzeichnis",
+                "default": "/fileserver/Filme",
+                "help":    "Pfad zum Ordner mit den Filmordnern (jeder Unterordner endet auf {imdb-ttXXX}).",
+            },
+            {
+                "id":      "series_dir",
+                "flag":    "--series-dir",
+                "label":   "Serien-Verzeichnis",
+                "default": "/fileserver/Serien",
+                "help":    "Pfad zum Ordner mit den Serienordnern (jeder Unterordner endet auf {imdb-ttXXX}).",
+            },
+        ],
+    },
 }
 
 LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/logs"))
@@ -165,7 +203,8 @@ def run_tool(tool):
         return jsonify({"error": "unknown tool"}), 404
 
     cfg = SCRIPTS[tool]
-    cmd = ["bash", cfg["script"]]
+    script = cfg["script"]
+    cmd = ["python3", script] if script.endswith(".py") else ["bash", script]
 
     # Flags (checkboxes)
     for param in cfg.get("params", []):
