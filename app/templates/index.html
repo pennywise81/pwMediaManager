@@ -13,7 +13,7 @@
   <header>
     <h1>⚙️ pwMediaManager</h1>
     <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-      <p class="subtitle" style="margin:0">Steuerung für pwMediaEnhancer &amp; pwPosterDownloader</p>
+      <p class="subtitle" style="margin:0">Steuerung für pwMediaEnhancer</p>
       <button class="delete-btn" onclick="clearAllLogs()" title="Alle Logs bis auf das jeweils neueste löschen">🗑️ Logs aufräumen</button>
     </div>
   </header>
@@ -107,19 +107,6 @@
                       onclick="runTool('{{ key }}', document.getElementById('form-{{ key }}'))">
                 ▶ Starten
               </button>
-              {% if key == 'pwPosterDownloader' %}
-              <button class="delete-btn" id="delete-btn-{{ key }}"
-                      onclick="deletePoster('{{ key }}')">🗑️ Poster zurücksetzen</button>
-              <span class="delete-status" id="delete-status-{{ key }}"></span>
-              {% endif %}
-              {% if cfg.config_path is defined %}
-              <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem">
-                <button class="test-btn" id="test-btn-poster-{{ key }}"
-                        onclick="runTestOverlay('{{ key }}', this, 'movies')">🎨 Vorschau Film</button>
-                <button class="test-btn" id="test-btn-episode-{{ key }}"
-                        onclick="runTestOverlay('{{ key }}', this, 'episode')">📺 Vorschau Episode</button>
-              </div>
-              {% endif %}
             </td>
             <td class="tool-logs">
               {% if log_files[key] %}
@@ -158,13 +145,6 @@
       <pre id="log-output" class="log-output"></pre>
     </section>
   </main>
-
-  <!-- ── Overlay Preview Modal ── -->
-  <div id="overlay-modal" onclick="this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:none;flex-direction:column;align-items:center;justify-content:center;cursor:pointer">
-    <p id="overlay-modal-title" style="color:#fff;font-family:sans-serif;font-size:1.1rem;margin-bottom:1rem;max-width:90%"></p>
-    <img id="overlay-modal-img" src="" style="max-width:min(500px,90vw);max-height:80vh;border-radius:8px;box-shadow:0 4px 32px #000">
-    <p style="color:#aaa;font-size:.8rem;margin-top:.8rem">Klicken zum Schließen</p>
-  </div>
 
   <script>
     let currentSource = null;
@@ -342,37 +322,6 @@
       while (ul.children.length > 10) ul.removeChild(ul.lastChild);
     }
 
-    function runTestOverlay(tool, btn, type) {
-      if (!type) {
-        const form = document.getElementById('form-' + tool);
-        const radios = form.querySelectorAll('[name="content_filter"]');
-        type = 'movies';
-        radios.forEach(r => { if (r.checked && r.value === '--series-only') type = 'series'; });
-      }
-
-      const origText = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = '⏳ Lade Vorschau…';
-
-      fetch('/api/test-overlay', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({tool, type}),
-        signal: AbortSignal.timeout(30000)
-      }).then(r => {
-        if (!r.ok) return r.json().then(j => { throw new Error(j.error || 'Test overlay failed'); });
-        const name = r.headers.get('X-Item-Name') || 'preview';
-        return r.blob().then(blob => ({blob, name}));
-      }).then(({blob, name}) => {
-        const imgUrl = URL.createObjectURL(blob);
-        const modal = document.getElementById('overlay-modal');
-        document.getElementById('overlay-modal-title').textContent = name;
-        document.getElementById('overlay-modal-img').src = imgUrl;
-        modal.style.display = 'flex';
-      }).catch(e => alert('Fehler: ' + e.message))
-        .finally(() => { btn.disabled = false; btn.textContent = origText; });
-    }
-
     function clearAllLogs() {
       if (!confirm('Alle Log-Dateien bis auf die jeweils neueste löschen?')) return;
       fetch('/api/clear-logs', {method: 'POST'})
@@ -382,32 +331,6 @@
           location.reload();
         })
         .catch(e => alert('Fehler: ' + e.message));
-    }
-
-    function deletePoster(tool) {
-      if (!confirm('Alle lokalen Poster löschen und Plex auf Standard-TMDB/TVDB-Poster zurücksetzen?\n\nDies kann je nach Bibliotheksgröße einige Minuten dauern.')) return;
-
-      const btn    = document.getElementById('delete-btn-' + tool);
-      const status = document.getElementById('delete-status-' + tool);
-      btn.disabled = true;
-      status.textContent = '⏳ Läuft… (kann einige Minuten dauern)';
-      status.style.color = '';
-
-      fetch('/api/delete-posters', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({tool, type: 'all'})
-      }).then(r => r.json())
-        .then(data => {
-          if (data.error) throw new Error(data.error);
-          status.textContent = `✅ ${data.deleted} Dateien gelöscht, ${data.reset} Poster in Plex zurückgesetzt${data.errors ? ' ('+data.errors+' Fehler)' : ''}`;
-          status.style.color = '#22c55e';
-        })
-        .catch(e => {
-          status.textContent = '❌ ' + e.message;
-          status.style.color = '#ef4444';
-        })
-        .finally(() => { btn.disabled = false; });
     }
   </script>
 </body>
