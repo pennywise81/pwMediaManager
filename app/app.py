@@ -44,6 +44,10 @@ TMDB_API_KEY = CONF.get("TMDB_API_KEY", os.environ.get("TMDB_API_KEY", ""))
 PLEX_URL   = CONF.get("PLEX_URL",   "http://192.168.178.200:32400").rstrip("/")
 PLEX_TOKEN = CONF.get("PLEX_TOKEN", "WYTd__H7hPH6a2ezqq2K")
 
+KOMETA_CONFIG_DIR   = os.environ.get("KOMETA_CONFIG_DIR",   "/mnt/user/appdata/kometa/config")
+KOMETA_CONFIG_LOCAL = Path(os.environ.get("KOMETA_CONFIG_LOCAL", "/kometa-config"))
+KOMETA_IMAGE        = "kometateam/kometa"
+
 SCRIPTS = {
     "pwMediaEnhancer": {
         "label":       "pwMediaEnhancer",
@@ -509,91 +513,72 @@ def delete_posters():
     return jsonify({"deleted": deleted, "reset": reset, "errors": errors})
 
 
-def _composite_rating_badge(poster_bytes: bytes, rating: str | None) -> bytes:
-    """Overlay an IMDb-style rating badge (bottom-right) onto a poster image."""
-    if not PIL_AVAILABLE:
-        return poster_bytes
-    try:
-        img = Image.open(io.BytesIO(poster_bytes)).convert("RGBA")
-        w, h = img.size
+def _build_test_overlay_config(lib_name: str, title: str, year: str | None,
+                               is_episode: bool) -> str:
+    """Generate a minimal Kometa config that applies rating overlays to ONE item."""
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
 
-        font_size  = max(20, int(h * 0.034))
-        label_size = max(14, int(font_size * 0.65))
-        try:
-            font_main  = ImageFont.load_default(size=font_size)
-            font_label = ImageFont.load_default(size=label_size)
-        except TypeError:
-            font_main = font_label = ImageFont.load_default()
+    if is_episode:
+        filter_block = (
+            "        filters:\n"
+            "          plex_search:\n"
+            "            all:\n"
+            f'              show_title.is: "{safe_title}"\n'
+        )
+        extra_tv = "          builder_level: episode\n"
+    else:
+        year_line = f'              year: {year}\n' if year else ""
+        filter_block = (
+            "        filters:\n"
+            "          plex_search:\n"
+            "            all:\n"
+            f'              title.is: "{safe_title}"\n'
+            f"{year_line}"
+        )
+        extra_tv = ""
 
-        rating_text = f"{float(rating):.1f}" if rating else "N/A"
-
-        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-        draw    = ImageDraw.Draw(overlay)
-
-        lbb = draw.textbbox((0, 0), "IMDb", font=font_label)
-        rbb = draw.textbbox((0, 0), rating_text, font=font_main)
-        lw, lh = lbb[2] - lbb[0], lbb[3] - lbb[1]
-        rw, rh = rbb[2] - rbb[0], rbb[3] - rbb[1]
-
-        pad_x, pad_y, gap = 12, 8, 10
-        badge_w = pad_x * 2 + lw + gap + rw
-        badge_h = pad_y * 2 + max(lh, rh)
-
-        x = w - badge_w - 15
-        y = h - badge_h - 15
-
-        draw.rounded_rectangle([x, y, x + badge_w, y + badge_h],
-                               radius=7, fill=(15, 15, 15, 215))
-
-        row_h = max(lh, rh)
-        draw.text((x + pad_x, y + pad_y + (row_h - lh) // 2),
-                  "IMDb", font=font_label, fill=(245, 197, 24, 255))
-        draw.text((x + pad_x + lw + gap, y + pad_y + (row_h - rh) // 2),
-                  rating_text, font=font_main, fill=(255, 255, 255, 255))
-
-        result = Image.alpha_composite(img, overlay)
-        out = io.BytesIO()
-        result.convert("RGB").save(out, format="JPEG", quality=95)
-        return out.getvalue()
-    except Exception:
-        return poster_bytes
+    return (
+        f"plex:\n"
+        f"  url: {PLEX_URL}\n"
+        f"  token: {PLEX_TOKEN}\n"
+        f"  timeout: 60\n"
+        f"  db_cache: 40\n"
+        f"tmdb:\n"
+        f"  apikey: {TMDB_API_KEY}\n"
+        f"  language: de\n"
+        f"libraries:\n"
+        f"  {lib_name}:\n"
+        f"    overlay_files:\n"
+        f"      - pmm: ratings\n"
+        f"        template_variables:\n"
+        f"          rating1: critic\n"
+        f"          rating1_image: imdb\n"
+        f"          horizontal_align: right\n"
+        f"          vertical_align: bottom\n"
+        f"          horizontal_offset: 15\n"
+        f"          vertical_offset: 15\n"
+        f"{extra_tv}"
+        f"{filter_block}"
+    )
 
 
 @app.route("/api/test-overlay", methods=["POST"])
 def test_overlay():
-    """Fetch a random poster/thumb from Plex and composite a rating badge preview."""
+    """Run Kometa with a temp config filtered to ONE item, return the overlaid poster."""
     data = request.json or {}
     tool         = data.get("tool", "pwKometaManager")
-    overlay_type = data.get("type", "movies")   # movies / episode
+    overlay_type = data.get("type", "movies")
     is_episode   = overlay_type == "episode"
 
-    cfg = SCRIPTS.get(tool)
-    if not cfg:
+    if not SCRIPTS.get(tool):
         return jsonify({"error": "unknown tool"}), 404
 
-    settings   = load_settings()
-    series_dir = settings.get(f"{tool}_series_dir", "/fileserver/Serien")
-    movies_dir = settings.get(f"{tool}_movies_dir", "/fileserver/Filme")
-
     if is_episode:
-        base_dir, section_id, tag_elem = series_dir, 2, "Directory"
+        section_id, tag_elem, lib_name = 2, "Directory", "Serien"
     else:
-        base_dir, section_id, tag_elem = movies_dir, 1, "Video"
+        section_id, tag_elem, lib_name = 1, "Video", "Filme"
 
-    # 1. Pick a random folder from disk
-    try:
-        entries = [e for e in os.scandir(base_dir) if e.is_dir()]
-    except Exception as e:
-        return jsonify({"error": f"Cannot list directory: {e}"}), 500
-    if not entries:
-        return jsonify({"error": "No entries found in directory"}), 404
-
-    entry       = random.choice(entries)
-    folder_name = entry.name
-    match = re.match(r'^(.+?)\s*\(\d{4}\)', folder_name)
-    title = match.group(1).strip() if match else re.sub(r'\s*\{[^}]+\}', '', folder_name).strip()
-
-    # 2. Fetch all items from the library and find by title match
+    # 1. Pick a random item from Plex
     try:
         resp = http_requests.get(
             f"{PLEX_URL}/library/sections/{section_id}/all",
@@ -601,24 +586,19 @@ def test_overlay():
             timeout=15,
         )
         resp.raise_for_status()
-        root = ET.fromstring(resp.content)
+        root  = ET.fromstring(resp.content)
         items = root.findall(f".//{tag_elem}")
-        # Match by title (case-insensitive, partial)
-        title_lower = title.lower()
-        item = next(
-            (i for i in items if title_lower in (i.get("title") or "").lower()),
-            None
-        )
+        if not items:
+            return jsonify({"error": "No items found in Plex library"}), 404
+        item = random.choice(items)
     except Exception as e:
-        return jsonify({"error": f"Plex search error: {e}"}), 500
+        return jsonify({"error": f"Plex error: {e}"}), 500
 
-    if item is None:
-        return jsonify({"error": f"Item not found in Plex: '{title}'"}), 404
+    plex_title = item.get("title", "")
+    plex_year  = item.get("year")
+    show_key   = item.get("ratingKey")
 
-    show_key = item.get("ratingKey")
-    rating   = item.get("rating")  # IMDb rating after mass_critic_rating_update
-
-    # 3. For episode mode: pick a random episode from the show
+    # 2. For episodes: pick one episode to show after the run
     if is_episode:
         try:
             ep_resp = http_requests.get(
@@ -627,25 +607,55 @@ def test_overlay():
                 timeout=15,
             )
             ep_resp.raise_for_status()
-            ep_root  = ET.fromstring(ep_resp.content)
-            episodes = ep_root.findall(".//Video")
+            ep_root   = ET.fromstring(ep_resp.content)
+            episodes  = ep_root.findall(".//Video")
             if not episodes:
                 return jsonify({"error": "No episodes found"}), 404
             ep         = random.choice(episodes)
             target_key = ep.get("ratingKey")
             ep_title   = ep.get("title", "Episode")
-            # Use show rating for episode badge (per-episode rating often missing)
-            if not rating:
-                rating = ep.get("rating")
-            # ASCII-safe header value
-            item_name = f"{folder_name} - {ep_title}".encode("ascii", "replace").decode("ascii")
+            item_name  = f"{plex_title} - {ep_title}".encode("ascii", "replace").decode("ascii")
         except Exception as e:
             return jsonify({"error": f"Episode fetch error: {e}"}), 500
     else:
         target_key = show_key
-        item_name  = folder_name.encode("ascii", "replace").decode("ascii")
+        item_name  = plex_title.encode("ascii", "replace").decode("ascii")
 
-    # 4. Fetch thumb from Plex
+    # 3. Generate temp Kometa config filtered to this item only
+    config_content = _build_test_overlay_config(lib_name, plex_title, plex_year, is_episode)
+    temp_cfg_local = KOMETA_CONFIG_LOCAL / "config_test_overlay.yml"
+    try:
+        temp_cfg_local.write_text(config_content, encoding="utf-8")
+    except Exception as e:
+        return jsonify({"error": f"Cannot write temp config: {e}"}), 500
+
+    # 4. Run Kometa with the temp config (synchronous, up to 3 minutes)
+    try:
+        result = subprocess.run(
+            [
+                "docker", "run", "--rm",
+                "-v", f"{KOMETA_CONFIG_DIR}:/config:rw",
+                KOMETA_IMAGE,
+                "--config", "/config/config_test_overlay.yml",
+                "--run",
+            ],
+            capture_output=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
+            return jsonify({"error": f"Kometa exited {result.returncode}: {stderr}"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Kometa timed out (>3 min)"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Docker error: {e}"}), 500
+    finally:
+        try:
+            temp_cfg_local.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    # 5. Return the now-overlaid poster/thumb from Plex
     try:
         thumb_resp = http_requests.get(
             f"{PLEX_URL}/library/metadata/{target_key}/thumb",
@@ -653,13 +663,10 @@ def test_overlay():
             timeout=15,
         )
         if not thumb_resp.ok:
-            return jsonify({"error": "Could not fetch image from Plex"}), 500
+            return jsonify({"error": "Could not fetch image from Plex after Kometa run"}), 500
         poster_data = thumb_resp.content
     except Exception as e:
         return jsonify({"error": f"Thumb fetch error: {e}"}), 500
-
-    # 5. Composite rating badge (IMDb-style, bottom-right)
-    poster_data = _composite_rating_badge(poster_data, rating)
 
     response = Response(poster_data, mimetype="image/jpeg")
     response.headers["X-Item-Name"] = item_name
