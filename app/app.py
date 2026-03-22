@@ -464,7 +464,7 @@ def delete_posters():
         try:
             http_requests.get(
                 f"{PLEX_URL}/library/sections/{sid}/refresh",
-                params={"X-Plex-Token": PLEX_TOKEN},
+                params={"force": 1, "X-Plex-Token": PLEX_TOKEN},
                 timeout=10,
             )
         except Exception:
