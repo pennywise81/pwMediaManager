@@ -382,6 +382,22 @@ def view_log(filename):
     return send_file(str(log_path), mimetype="text/plain")
 
 
+@app.route("/api/clear-logs", methods=["POST"])
+def clear_logs():
+    """Delete all log files except the newest one per tool."""
+    deleted = 0
+    for key, cfg in SCRIPTS.items():
+        pattern = str(LOGS_DIR / f"{cfg['log_prefix']}_*.log")
+        files = sorted(glob.glob(pattern), reverse=True)
+        for f in files[1:]:   # keep files[0] (newest), delete the rest
+            try:
+                os.remove(f)
+                deleted += 1
+            except Exception:
+                pass
+    return jsonify({"ok": True, "deleted": deleted})
+
+
 @app.route("/api/jobs")
 def api_jobs():
     with jobs_lock:

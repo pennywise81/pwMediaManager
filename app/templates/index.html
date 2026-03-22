@@ -12,7 +12,10 @@
 <body>
   <header>
     <h1>⚙️ pwMediaManager</h1>
-    <p class="subtitle">Steuerung für pwMediaEnhancer &amp; pwPosterDownloader</p>
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <p class="subtitle" style="margin:0">Steuerung für pwMediaEnhancer &amp; pwPosterDownloader</p>
+      <button class="delete-btn" onclick="clearAllLogs()" title="Alle Logs bis auf das jeweils neueste löschen">🗑️ Logs aufräumen</button>
+    </div>
   </header>
 
   <main>
@@ -367,6 +370,17 @@
         modal.style.display = 'flex';
       }).catch(e => alert('Fehler: ' + e.message))
         .finally(() => { btn.disabled = false; btn.textContent = origText; });
+    }
+
+    function clearAllLogs() {
+      if (!confirm('Alle Log-Dateien bis auf die jeweils neueste löschen?')) return;
+      fetch('/api/clear-logs', {method: 'POST'})
+        .then(r => r.json())
+        .then(j => {
+          alert(`${j.deleted} Log-Datei(en) gelöscht.`);
+          location.reload();
+        })
+        .catch(e => alert('Fehler: ' + e.message));
     }
 
     function deletePoster(tool) {
