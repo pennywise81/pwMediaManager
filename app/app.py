@@ -422,14 +422,12 @@ def delete_posters():
     series_dir = settings.get("pwPosterDownloader_series_dir", "/fileserver/Serien")
 
     ARTWORK_NAMES = {
-        "poster.jpg", "poster.png",
-        "folder.jpg", "folder.png",
-        "fanart.jpg",  "fanart.png",
-        "backdrop.jpg","backdrop.png",
-        "landscape.jpg","landscape.png",
-        "banner.jpg",  "banner.png",
+        "poster.jpg", "poster.png", "folder.jpg", "folder.png",
+        "fanart.jpg", "fanart.png", "backdrop.jpg", "backdrop.png",
+        "landscape.jpg", "landscape.png", "banner.jpg", "banner.png",
     }
 
+    # 1. Delete local artwork files from disk
     dirs_to_process = []
     if poster_type in ("movies", "all"):
         dirs_to_process.append(("movies", movies_dir))
@@ -452,25 +450,63 @@ def delete_posters():
         except Exception:
             pass
 
-    # Trigger Plex library refresh
-    section_ids = []
+    # 2. For each Plex item: select the first metadata-agent poster (tmdb/tvdb/etc.)
+    PREFERRED_PROVIDERS = {"tmdb", "tvdb", "imdb", "fanarttv", "gracenote"}
+    section_map = {}
     if poster_type in ("movies", "all"):
-        section_ids.append(1)
+        section_map[1] = "Video"
     if poster_type in ("series", "all"):
-        section_ids.append(2)
+        section_map[2] = "Directory"
 
-    refreshed = True
-    for sid in section_ids:
+    reset = 0
+    errors = 0
+    for sid, elem_tag in section_map.items():
         try:
-            http_requests.get(
-                f"{PLEX_URL}/library/sections/{sid}/refresh",
-                params={"force": 1, "X-Plex-Token": PLEX_TOKEN},
-                timeout=10,
+            resp = http_requests.get(
+                f"{PLEX_URL}/library/sections/{sid}/all",
+                params={"X-Plex-Token": PLEX_TOKEN},
+                timeout=30,
             )
+            resp.raise_for_status()
+            root = ET.fromstring(resp.content)
+            items = root.findall(f".//{elem_tag}")
         except Exception:
-            refreshed = False
+            continue
 
-    return jsonify({"deleted": deleted, "refreshed": refreshed})
+        for item in items:
+            rk = item.get("ratingKey")
+            if not rk:
+                continue
+            try:
+                pr = http_requests.get(
+                    f"{PLEX_URL}/library/metadata/{rk}/posters",
+                    params={"X-Plex-Token": PLEX_TOKEN},
+                    timeout=10,
+                )
+                if not pr.ok:
+                    continue
+                pr_root = ET.fromstring(pr.content)
+                # Pick first poster from a metadata provider (not upload://)
+                chosen_url = None
+                for photo in pr_root.findall(".//Photo"):
+                    provider = photo.get("provider") or ""
+                    rk_url   = photo.get("ratingKey", "")
+                    if provider in PREFERRED_PROVIDERS or (
+                        provider == "" and not rk_url.startswith("upload://")
+                    ):
+                        chosen_url = rk_url
+                        break
+                if chosen_url:
+                    http_requests.put(
+                        f"{PLEX_URL}/library/metadata/{rk}/poster",
+                        params={"url": chosen_url, "X-Plex-Token": PLEX_TOKEN},
+                        timeout=10,
+                    )
+                    reset += 1
+            except Exception:
+                errors += 1
+
+    return jsonify({"deleted": deleted, "reset": reset, "errors": errors})
 
 
 @app.route("/api/test-overlay", methods=["POST"])

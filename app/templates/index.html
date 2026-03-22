@@ -384,12 +384,12 @@
     }
 
     function deletePoster(tool) {
-      if (!confirm('Alle heruntergeladenen Poster löschen und Plex-Standardposter wiederherstellen?')) return;
+      if (!confirm('Alle lokalen Poster löschen und Plex auf Standard-TMDB/TVDB-Poster zurücksetzen?\n\nDies kann je nach Bibliotheksgröße einige Minuten dauern.')) return;
 
       const btn    = document.getElementById('delete-btn-' + tool);
       const status = document.getElementById('delete-status-' + tool);
       btn.disabled = true;
-      status.textContent = '⏳ Lösche…';
+      status.textContent = '⏳ Läuft… (kann einige Minuten dauern)';
       status.style.color = '';
 
       fetch('/api/delete-posters', {
@@ -399,7 +399,7 @@
       }).then(r => r.json())
         .then(data => {
           if (data.error) throw new Error(data.error);
-          status.textContent = `✅ ${data.deleted} Poster gelöscht, Plex-Refresh ${data.refreshed ? 'OK' : 'fehlgeschlagen'}`;
+          status.textContent = `✅ ${data.deleted} Dateien gelöscht, ${data.reset} Poster in Plex zurückgesetzt${data.errors ? ' ('+data.errors+' Fehler)' : ''}`;
           status.style.color = '#22c55e';
         })
         .catch(e => {
