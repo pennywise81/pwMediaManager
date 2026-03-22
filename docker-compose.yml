@@ -11,12 +11,18 @@ services:
       # Scripts (read-only mounts from their git repos)
       - /mnt/user/Fileserver/scripts/pwMediaEnhancer:/scripts/pwMediaEnhancer:ro
       - /mnt/user/Fileserver/scripts/pwPosterDownloader:/scripts/pwPosterDownloader:ro
+      - /mnt/user/Fileserver/scripts/pwKometaManager:/scripts/pwKometaManager:ro
       # Config for both scripts
       - /boot/config/pwMediaEnhancer.conf:/boot/config/pwMediaEnhancer.conf:ro
+      # Kometa config (rw: script reads and writes temp configs here)
+      - /mnt/user/appdata/kometa/config:/kometa-config:rw
       # Media directories (pwMediaEnhancer needs write access to move files)
       - /mnt/user/Fileserver:/fileserver
       # Log output + persisted settings
       - /mnt/user/appdata/pwMediaManager/logs:/logs
+      # Docker CLI access (to launch Kometa container)
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker:ro
     environment:
       - LOGS_DIR=/logs
       - PWMEDIAENHANCER_CONFIG=/boot/config/pwMediaEnhancer.conf
