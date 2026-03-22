@@ -219,7 +219,8 @@
           currentSource = new EventSource('/stream/' + result.job_id);
 
           currentSource.onmessage = e => {
-            appendLog(JSON.parse(e.data));
+            const lines = JSON.parse(e.data);
+            lines.forEach(appendLog);
           };
 
           currentSource.addEventListener('done', e => {
@@ -246,17 +247,30 @@
       return false;
     }
 
+    const MAX_LOG_LINES = 5000;
+    let logBuffer = [];
+    let rafPending = false;
+
     function appendLog(line) {
-      const out = document.getElementById('log-output');
-      out.textContent += line + '\n';
-      if (document.getElementById('auto-scroll').checked) {
-        out.scrollTop = out.scrollHeight;
+      logBuffer.push(line);
+      if (logBuffer.length > MAX_LOG_LINES) logBuffer.splice(0, logBuffer.length - MAX_LOG_LINES);
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(() => {
+          const out = document.getElementById('log-output');
+          out.textContent = logBuffer.join('\n');
+          if (document.getElementById('auto-scroll').checked) {
+            out.scrollTop = out.scrollHeight;
+          }
+          rafPending = false;
+        });
       }
     }
 
     function openLogPanel(tool) {
       const panel = document.getElementById('log-panel');
       panel.style.display = 'block';
+      logBuffer = [];
       document.getElementById('log-output').textContent = '';
       document.getElementById('log-title').textContent = 'Live-Ausgabe – ' + tool;
       panel.scrollIntoView({ behavior: 'smooth' });

@@ -304,7 +304,7 @@ def run_tool(tool):
 
 @app.route("/stream/<job_id>")
 def stream(job_id):
-    """SSE endpoint: streams log file lines as they appear."""
+    """SSE endpoint: streams log file lines as they appear, batched to avoid flooding."""
     with jobs_lock:
         job = jobs.get(job_id)
     if not job:
@@ -320,6 +320,9 @@ def stream(job_id):
             time.sleep(0.1)
 
         pos = 0
+        batch = []
+        last_flush = time.time()
+
         while True:
             with jobs_lock:
                 status = jobs.get(job_id, {}).get("status", "done")
@@ -330,14 +333,22 @@ def stream(job_id):
                     chunk = f.read()
                     if chunk:
                         pos += len(chunk)
-                        for line in chunk.splitlines():
-                            yield f"data: {json.dumps(line)}\n\n"
+                        batch.extend(chunk.splitlines())
 
-            if status in ("done", "error"):
+            now = time.time()
+            is_done = status in ("done", "error")
+
+            # Send batch every 400 ms or when job finishes
+            if batch and (now - last_flush >= 0.4 or is_done):
+                yield f"data: {json.dumps(batch)}\n\n"
+                batch = []
+                last_flush = now
+
+            if is_done:
                 yield f"event: done\ndata: {status}\n\n"
                 break
 
-            time.sleep(0.3)
+            time.sleep(0.1)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
