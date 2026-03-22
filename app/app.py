@@ -484,7 +484,7 @@ def test_overlay():
     tag_elem = "Video" if overlay_type == "movies" else "Directory"
     try:
         resp = http_requests.get(
-            f"{PLEX_URL}/library/sections/{section_id}/search",
+            f"{PLEX_URL}/library/sections/{section_id}/all",
             params={"title": title, "X-Plex-Token": PLEX_TOKEN},
             timeout=15,
         )
