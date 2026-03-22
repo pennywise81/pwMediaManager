@@ -452,6 +452,8 @@ def delete_posters():
 
 @app.route("/api/test-overlay", methods=["POST"])
 def test_overlay():
+    """Show current poster/thumb from Plex for a random item.
+    No Kometa run — displays the actual overlay result from the last real run."""
     data = request.json or {}
     tool         = data.get("tool", "pwKometaManager")
     overlay_type = data.get("type", "movies")   # movies / series / episode
@@ -505,7 +507,7 @@ def test_overlay():
 
     show_key = item.get("ratingKey")
 
-    # 3a. For episode mode: pick a random episode
+    # 3. For episode mode: pick a random episode
     if is_episode:
         try:
             ep_resp = http_requests.get(
@@ -514,43 +516,20 @@ def test_overlay():
                 timeout=15,
             )
             ep_resp.raise_for_status()
-            ep_root    = ET.fromstring(ep_resp.content)
-            episodes   = ep_root.findall(".//Video")
+            ep_root  = ET.fromstring(ep_resp.content)
+            episodes = ep_root.findall(".//Video")
             if not episodes:
                 return jsonify({"error": "No episodes found"}), 404
             ep         = random.choice(episodes)
             target_key = ep.get("ratingKey")
-            label_key  = show_key   # label goes on the SHOW so Kometa processes it
             item_name  = f"{folder_name} – {ep.get('title', 'Episode')}"
         except Exception as e:
             return jsonify({"error": f"Episode fetch error: {e}"}), 500
     else:
         target_key = show_key
-        label_key  = show_key
         item_name  = folder_name
 
-    # 4. Add "test" label (always on the show/movie, not on episode)
-    try:
-        http_requests.put(
-            f"{PLEX_URL}/library/metadata/{label_key}",
-            params={"label[0].tag.tag": "test", "X-Plex-Token": PLEX_TOKEN},
-            timeout=10,
-        )
-    except Exception as e:
-        return jsonify({"error": f"Plex label error: {e}"}), 500
-
-    # 5. Run Kometa with --run-tests --overlays-only
-    script_path = cfg.get("script", "/scripts/pwKometaManager/pwKometaManager.sh")
-    cmd = ["bash", script_path, "--run-tests", "--overlays-only",
-           "--movies-dir", movies_dir, "--series-dir", series_dir]
-    try:
-        subprocess.run(cmd, timeout=300, check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except (subprocess.TimeoutExpired, Exception):
-        pass
-
-    # 6. Fetch poster/thumb
-    thumb_path = "thumb" if not is_episode else "thumb"
+    # 4. Fetch current poster/thumb from Plex (no Kometa run, no Plex modifications)
     poster_data = None
     try:
         thumb_resp = http_requests.get(
@@ -563,19 +542,8 @@ def test_overlay():
     except Exception:
         pass
 
-    # 7. Remove "test" label (from show/movie)
-    try:
-        http_requests.put(
-            f"{PLEX_URL}/library/metadata/{label_key}",
-            params={"label[0].tag.tag": "test", "label[0].tag.remove": "1",
-                    "X-Plex-Token": PLEX_TOKEN},
-            timeout=10,
-        )
-    except Exception:
-        pass
-
     if not poster_data:
-        return jsonify({"error": "Could not fetch image from Plex after Kometa run"}), 500
+        return jsonify({"error": "Could not fetch image from Plex"}), 500
 
     response = Response(poster_data, mimetype="image/jpeg")
     response.headers["X-Item-Name"] = item_name

@@ -112,9 +112,9 @@
               {% if cfg.config_path is defined %}
               <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem">
                 <button class="test-btn" id="test-btn-poster-{{ key }}"
-                        onclick="runTestOverlay('{{ key }}', this, 'movies')">🎨 Poster Test</button>
+                        onclick="runTestOverlay('{{ key }}', this, 'movies')">🎨 Vorschau Film</button>
                 <button class="test-btn" id="test-btn-episode-{{ key }}"
-                        onclick="runTestOverlay('{{ key }}', this, 'episode')">📺 Episode Test</button>
+                        onclick="runTestOverlay('{{ key }}', this, 'episode')">📺 Vorschau Episode</button>
               </div>
               {% endif %}
             </td>
@@ -349,7 +349,7 @@
 
       const origText = btn.textContent;
       btn.disabled = true;
-      btn.textContent = '⏳ Bitte warten (~1 Min)…';
+      btn.textContent = '⏳ Wird geladen…';
 
       fetch('/api/test-overlay', {
         method: 'POST',
