@@ -104,8 +104,14 @@
                       onclick="runTool('{{ key }}', document.getElementById('form-{{ key }}'))">
                 ▶ Starten
               </button>
+              {% if key == 'pwPosterDownloader' %}
+              <button class="delete-btn" id="delete-btn-{{ key }}"
+                      onclick="deletePoster('{{ key }}')">🗑️ Poster zurücksetzen</button>
+              <span class="delete-status" id="delete-status-{{ key }}"></span>
+              {% endif %}
               {% if cfg.config_path is defined %}
-              <button class="test-btn" onclick="runTestOverlay('{{ key }}')">🎨 Test Overlay</button>
+              <button class="test-btn" id="test-btn-{{ key }}"
+                      onclick="runTestOverlay('{{ key }}', this)">🎨 Test Overlay</button>
               {% endif %}
             </td>
             <td class="tool-logs">
@@ -322,11 +328,15 @@
       while (ul.children.length > 10) ul.removeChild(ul.lastChild);
     }
 
-    function runTestOverlay(tool) {
+    function runTestOverlay(tool, btn) {
       const form = document.getElementById('form-' + tool);
       const radios = form.querySelectorAll('[name="content_filter"]');
       let type = 'movies';
       radios.forEach(r => { if (r.checked && r.value === '--series-only') type = 'series'; });
+
+      const origText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '⏳ Bitte warten (~1 Min)…';
 
       fetch('/api/test-overlay', {
         method: 'POST',
@@ -340,7 +350,34 @@
         const url = URL.createObjectURL(blob);
         const win = window.open('', '_blank');
         win.document.write(`<html><body style="margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh"><h2 style="color:#fff;font-family:sans-serif;padding:1rem">${name}</h2><img src="${url}" style="max-width:500px;border-radius:8px;box-shadow:0 4px 32px #000"></body></html>`);
-      }).catch(e => alert('Fehler: ' + e.message));
+      }).catch(e => alert('Fehler: ' + e.message))
+        .finally(() => { btn.disabled = false; btn.textContent = origText; });
+    }
+
+    function deletePoster(tool) {
+      if (!confirm('Alle heruntergeladenen Poster löschen und Plex-Standardposter wiederherstellen?')) return;
+
+      const btn    = document.getElementById('delete-btn-' + tool);
+      const status = document.getElementById('delete-status-' + tool);
+      btn.disabled = true;
+      status.textContent = '⏳ Lösche…';
+      status.style.color = '';
+
+      fetch('/api/delete-posters', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({tool, type: 'all'})
+      }).then(r => r.json())
+        .then(data => {
+          if (data.error) throw new Error(data.error);
+          status.textContent = `✅ ${data.deleted} Poster gelöscht, Plex-Refresh ${data.refreshed ? 'OK' : 'fehlgeschlagen'}`;
+          status.style.color = '#22c55e';
+        })
+        .catch(e => {
+          status.textContent = '❌ ' + e.message;
+          status.style.color = '#ef4444';
+        })
+        .finally(() => { btn.disabled = false; });
     }
   </script>
 </body>

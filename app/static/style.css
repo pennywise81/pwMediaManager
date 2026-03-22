@@ -371,3 +371,26 @@ header h1 {
   transition: background 0.15s;
 }
 .test-btn:hover { background: #2d1f5e; }
+.test-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.delete-btn {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: #1e293b;
+  border: 1px solid #dc2626;
+  border-radius: 5px;
+  color: #f87171;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.delete-btn:hover { background: #3b1e1e; }
+.delete-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.delete-status {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}

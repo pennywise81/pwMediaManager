@@ -11,6 +11,7 @@ import glob
 import random
 import io
 import re
+import xml.etree.ElementTree as ET
 import requests as http_requests
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,8 @@ def load_conf():
 
 CONF = load_conf()
 TMDB_API_KEY = CONF.get("TMDB_API_KEY", os.environ.get("TMDB_API_KEY", ""))
+PLEX_URL   = CONF.get("PLEX_URL",   "http://192.168.178.200:32400").rstrip("/")
+PLEX_TOKEN = CONF.get("PLEX_TOKEN", "WYTd__H7hPH6a2ezqq2K")
 
 SCRIPTS = {
     "pwMediaEnhancer": {
@@ -132,6 +135,7 @@ SCRIPTS = {
         "config_path": "/mnt/user/appdata/kometa/config/config.yml",
         "params": [
             {"id": "dry_run", "flag": "--dry-run", "label": "Dry-Run"},
+            {"id": "remove_overlays", "flag": "--remove-overlays", "label": "Alle Badges entfernen"},
         ],
         "radio_groups": [
             {
@@ -385,91 +389,170 @@ def api_settings():
     return jsonify(load_settings())
 
 
+@app.route("/api/delete-posters", methods=["POST"])
+def delete_posters():
+    data = request.json or {}
+    poster_type = data.get("type", "all")   # "movies", "series", or "all"
+
+    settings   = load_settings()
+    movies_dir = settings.get("pwPosterDownloader_movies_dir", "/fileserver/Filme")
+    series_dir = settings.get("pwPosterDownloader_series_dir", "/fileserver/Serien")
+
+    ARTWORK_NAMES = {
+        "poster.jpg", "poster.png",
+        "folder.jpg", "folder.png",
+        "fanart.jpg",  "fanart.png",
+        "backdrop.jpg","backdrop.png",
+        "landscape.jpg","landscape.png",
+        "banner.jpg",  "banner.png",
+    }
+
+    dirs_to_process = []
+    if poster_type in ("movies", "all"):
+        dirs_to_process.append(("movies", movies_dir))
+    if poster_type in ("series", "all"):
+        dirs_to_process.append(("series", series_dir))
+
+    deleted = 0
+    for kind, base_dir in dirs_to_process:
+        try:
+            for entry in os.scandir(base_dir):
+                if not entry.is_dir():
+                    continue
+                for fname in os.listdir(entry.path):
+                    if fname.lower() in ARTWORK_NAMES:
+                        try:
+                            os.remove(os.path.join(entry.path, fname))
+                            deleted += 1
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+
+    # Trigger Plex library refresh
+    section_ids = []
+    if poster_type in ("movies", "all"):
+        section_ids.append(1)
+    if poster_type in ("series", "all"):
+        section_ids.append(2)
+
+    refreshed = True
+    for sid in section_ids:
+        try:
+            http_requests.get(
+                f"{PLEX_URL}/library/sections/{sid}/refresh",
+                params={"X-Plex-Token": PLEX_TOKEN},
+                timeout=10,
+            )
+        except Exception:
+            refreshed = False
+
+    return jsonify({"deleted": deleted, "refreshed": refreshed})
+
+
 @app.route("/api/test-overlay", methods=["POST"])
 def test_overlay():
-    if not PIL_AVAILABLE:
-        return jsonify({"error": "Pillow not installed"}), 500
-
     data = request.json or {}
-    tool = data.get("tool", "pwKometaManager")
+    tool         = data.get("tool", "pwKometaManager")
     overlay_type = data.get("type", "movies")
 
     cfg = SCRIPTS.get(tool)
     if not cfg:
         return jsonify({"error": "unknown tool"}), 404
 
-    settings = load_settings()
-    dir_key = "movies_dir" if overlay_type == "movies" else "series_dir"
+    settings  = load_settings()
+    dir_key   = "movies_dir" if overlay_type == "movies" else "series_dir"
+    section_id = 1 if overlay_type == "movies" else 2
     default_dir = "/fileserver/Filme" if overlay_type == "movies" else "/fileserver/Serien"
-    base_dir = settings.get(f"{tool}_{dir_key}", default_dir)
+    base_dir  = settings.get(f"{tool}_{dir_key}", default_dir)
 
+    # 1. Pick a random folder
     try:
         entries = [e for e in os.scandir(base_dir) if e.is_dir()]
     except Exception as e:
         return jsonify({"error": f"Cannot list directory: {e}"}), 500
-
     if not entries:
         return jsonify({"error": "No entries found in directory"}), 404
 
-    entry = random.choice(entries)
+    entry       = random.choice(entries)
     folder_name = entry.name
+    # Extract title (strip year and imdb suffix)
+    match = re.match(r'^(.+?)\s*\(\d{4}\)', folder_name)
+    title = match.group(1).strip() if match else re.sub(r'\s*\{[^}]+\}', '', folder_name).strip()
 
-    match = re.match(r'^(.+?)\s*\((\d{4})\)', folder_name)
-    title = match.group(1).strip() if match else folder_name
-    year = match.group(2) if match else None
-
-    search_type = "movie" if overlay_type == "movies" else "tv"
-    params = {"api_key": TMDB_API_KEY, "query": title}
-    if year:
-        params["year"] = year
-
+    # 2. Search Plex for the item
+    tag_elem = "Video" if overlay_type == "movies" else "Directory"
     try:
         resp = http_requests.get(
-            f"https://api.themoviedb.org/3/search/{search_type}",
-            params=params, timeout=10
+            f"{PLEX_URL}/library/sections/{section_id}/search",
+            params={"title": title, "X-Plex-Token": PLEX_TOKEN},
+            timeout=15,
         )
         resp.raise_for_status()
-        results = resp.json().get("results", [])
+        root = ET.fromstring(resp.content)
+        item = root.find(f".//{tag_elem}")
     except Exception as e:
-        return jsonify({"error": f"TMDB error: {e}"}), 500
+        return jsonify({"error": f"Plex search error: {e}"}), 500
 
-    if not results or not results[0].get("poster_path"):
-        return jsonify({"error": f"No poster found for '{title}'"}), 404
+    if item is None:
+        return jsonify({"error": f"Item not found in Plex: '{title}'"}), 404
 
-    poster_url = f"https://image.tmdb.org/t/p/w500{results[0]['poster_path']}"
+    rating_key = item.get("ratingKey")
+
+    # 3. Add "test" label to item
     try:
-        img_resp = http_requests.get(poster_url, timeout=15)
-        img_resp.raise_for_status()
-        img = Image.open(io.BytesIO(img_resp.content)).convert("RGBA")
+        http_requests.put(
+            f"{PLEX_URL}/library/metadata/{rating_key}",
+            params={"label[0].tag.tag": "test", "X-Plex-Token": PLEX_TOKEN},
+            timeout=10,
+        )
     except Exception as e:
-        return jsonify({"error": f"Poster download error: {e}"}), 500
+        return jsonify({"error": f"Plex label error: {e}"}), 500
 
-    draw = ImageDraw.Draw(img)
-    w, h = img.size
+    # 4. Run Kometa with --run-tests --overlays-only
+    script_path = cfg.get("script", "/scripts/pwKometaManager/pwKometaManager.sh")
+    cmd = ["bash", script_path, "--run-tests", "--overlays-only"]
+    movies_dir = settings.get("pwKometaManager_movies_dir", "/fileserver/Filme")
+    series_dir = settings.get("pwKometaManager_series_dir", "/fileserver/Serien")
+    cmd += ["--movies-dir", movies_dir, "--series-dir", series_dir]
 
-    # Semi-transparent bottom bar with folder title
-    bar_h = 64
-    bar = Image.new("RGBA", (w, bar_h), (0, 0, 0, 190))
-    img.paste(bar, (0, h - bar_h), bar)
-    draw = ImageDraw.Draw(img)
-    draw.text((12, h - bar_h + 10), folder_name[:60], fill=(255, 255, 255, 230))
-
-    # "KOMETA TEST" badge at top-right
-    badge_text = "KOMETA TEST"
-    badge_w, badge_h = 124, 28
-    bx = w - badge_w - 10
-    by = 10
     try:
-        draw.rounded_rectangle([bx, by, bx + badge_w, by + badge_h], radius=6, fill=(124, 58, 237, 220))
-    except AttributeError:
-        draw.rectangle([bx, by, bx + badge_w, by + badge_h], fill=(124, 58, 237, 220))
-    draw.text((bx + 8, by + 6), badge_text, fill=(255, 255, 255, 255))
+        subprocess.run(cmd, timeout=300, check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception as e:
+        # Best-effort: still try to return poster and clean up label
+        pass
 
-    out = io.BytesIO()
-    img.convert("RGB").save(out, format="PNG")
-    out.seek(0)
+    # 5. Fetch the item's current poster from Plex
+    poster_data = None
+    try:
+        thumb_resp = http_requests.get(
+            f"{PLEX_URL}/library/metadata/{rating_key}/thumb",
+            params={"X-Plex-Token": PLEX_TOKEN},
+            timeout=15,
+        )
+        if thumb_resp.ok:
+            poster_data = thumb_resp.content
+    except Exception:
+        pass
 
-    response = Response(out.read(), mimetype="image/png")
+    # 6. Remove "test" label
+    try:
+        http_requests.put(
+            f"{PLEX_URL}/library/metadata/{rating_key}",
+            params={"label[0].tag.tag": "test", "label[0].tag.remove": "1",
+                    "X-Plex-Token": PLEX_TOKEN},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+    if not poster_data:
+        return jsonify({"error": "Could not fetch poster from Plex after Kometa run"}), 500
+
+    response = Response(poster_data, mimetype="image/jpeg")
     response.headers["X-Item-Name"] = folder_name
     return response
 
