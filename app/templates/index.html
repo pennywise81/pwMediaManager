@@ -352,13 +352,13 @@
 
       const origText = btn.textContent;
       btn.disabled = true;
-      btn.textContent = '⏳ Kometa läuft… (1-2 Min)';
+      btn.textContent = '⏳ Lade Vorschau…';
 
       fetch('/api/test-overlay', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({tool, type}),
-        signal: AbortSignal.timeout(200000)   // 200s browser timeout
+        signal: AbortSignal.timeout(30000)
       }).then(r => {
         if (!r.ok) return r.json().then(j => { throw new Error(j.error || 'Test overlay failed'); });
         const name = r.headers.get('X-Item-Name') || 'preview';

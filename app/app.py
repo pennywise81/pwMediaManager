@@ -46,7 +46,7 @@ PLEX_TOKEN = CONF.get("PLEX_TOKEN", "WYTd__H7hPH6a2ezqq2K")
 
 KOMETA_CONFIG_DIR   = os.environ.get("KOMETA_CONFIG_DIR",   "/mnt/user/appdata/kometa/config")
 KOMETA_CONFIG_LOCAL = Path(os.environ.get("KOMETA_CONFIG_LOCAL", "/kometa-config"))
-KOMETA_IMAGE        = "kometateam/kometa"
+KOMETA_ASSETS       = Path(os.environ.get("KOMETA_ASSETS", "/kometa-assets"))
 
 SCRIPTS = {
     "pwMediaEnhancer": {
@@ -513,78 +513,142 @@ def delete_posters():
     return jsonify({"deleted": deleted, "reset": reset, "errors": errors})
 
 
-def _build_test_overlay_config(lib_name: str, title: str, year: str | None,
-                               is_episode: bool) -> str:
-    """Generate a minimal Kometa config applying ALL overlays to ONE item only.
-    Uses flat filter syntax (no plex_search wrapper) — the correct syntax for
-    overlay_files item filters in Kometa."""
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'")
+def _plex_media_info(rk: str) -> dict:
+    """Return resolution key and audio codec key for a Plex item."""
+    try:
+        resp = http_requests.get(
+            f"{PLEX_URL}/library/metadata/{rk}",
+            params={"X-Plex-Token": PLEX_TOKEN, "includeStreams": 1},
+            timeout=10,
+        )
+        if not resp.ok:
+            return {}
+        root  = ET.fromstring(resp.content)
+        video = root.find(".//Stream[@streamType='1']")
+        audio = root.find(".//Stream[@streamType='2']")
 
-    if is_episode:
-        filter_block = (
-            "        filters:\n"
-            f'          show_title.is: "{safe_title}"\n'
-        )
-    else:
-        year_line = f"          year: {year}\n" if year else ""
-        filter_block = (
-            "        filters:\n"
-            f'          title.is: "{safe_title}"\n'
-            f"{year_line}"
-        )
+        resolution = "1080p"
+        if video:
+            h    = int(video.get("height", 0))
+            hdr  = video.get("colorTrc", "").lower() in ("smpte2084", "arib-std-b67", "bt2020")
+            resolution = ("4khdr" if hdr else "4k") if h >= 2160 else \
+                         ("1080phdr" if hdr else "1080p") if h >= 1080 else \
+                         "720p" if h >= 720 else "480p"
 
-    def overlay_entry(default: str, extra_tv: str = "") -> str:
-        return (
-            f"      - default: {default}\n"
-            f"        template_variables:\n"
-            f"{extra_tv}"
-            f"{filter_block}"
-        )
+        audio_codec = None
+        if audio:
+            dt = audio.get("displayTitle", "").lower()
+            co = audio.get("codec",        "").lower()
+            if   "truehd" in dt and "atmos" in dt: audio_codec = "truehd_atmos"
+            elif "truehd" in dt:                   audio_codec = "truehd"
+            elif "atmos"  in dt:                   audio_codec = "atmos"
+            elif "dts-x"  in dt or "dtsx" in dt:   audio_codec = "dtsx"
+            elif "dts-ma" in dt:                   audio_codec = "ma"
+            elif "dts"    in dt:                   audio_codec = "dts"
+            elif "dd+"    in dt or "eac3" in co:   audio_codec = "plus"
+            elif "dolby"  in dt:                   audio_codec = "digital"
+            elif "aac"    in co:                   audio_codec = "aac"
+            elif "flac"   in co:                   audio_codec = "flac"
+            elif "mp3"    in co:                   audio_codec = "mp3"
+        return {"resolution": resolution, "audio_codec": audio_codec}
+    except Exception:
+        return {}
 
-    if is_episode:
-        overlays = (
-            overlay_entry("resolution",  "          builder_level: episode\n") +
-            overlay_entry("audio_codec", "          builder_level: episode\n") +
-            overlay_entry("ratings", (
-                "          builder_level: episode\n"
-                "          rating1: critic\n"
-                "          rating1_image: imdb\n"
-                "          horizontal_position: right\n"
-                "          vertical_position: bottom\n"
-            ))
-        )
-    else:
-        overlays = (
-            overlay_entry("resolution") +
-            overlay_entry("audio_codec") +
-            overlay_entry("ratings", (
-                "          rating1: critic\n"
-                "          rating1_image: imdb\n"
-                "          horizontal_position: right\n"
-                "          vertical_position: bottom\n"
-            ))
-        )
 
-    return (
-        f"plex:\n"
-        f"  url: {PLEX_URL}\n"
-        f"  token: {PLEX_TOKEN}\n"
-        f"  timeout: 60\n"
-        f"  db_cache: 40\n"
-        f"  verify_ssl: false\n"
-        f"tmdb:\n"
-        f"  apikey: {TMDB_API_KEY}\n"
-        f"  language: de\n"
-        f"libraries:\n"
-        f"  {lib_name}:\n"
-        f"    overlay_files:\n"
-        f"{overlays}"
-    )
+def _composite_kometa_overlays(poster_bytes: bytes, rating: str | None, rk: str) -> bytes:
+    """Composite Kometa's real badge PNGs onto a poster using PIL.
+    Uses the exact same badge images that kometateam/kometa would apply."""
+    if not PIL_AVAILABLE or not KOMETA_ASSETS.exists():
+        return poster_bytes
+    try:
+        img = Image.open(io.BytesIO(poster_bytes)).convert("RGBA")
+        w, h = img.size
+        scale = w / 680.0   # Kometa designs for ~680px wide posters
+
+        info = _plex_media_info(rk)
+
+        def load_badge(rel_path: str) -> Image.Image | None:
+            p = KOMETA_ASSETS / rel_path
+            return Image.open(p).convert("RGBA") if p.exists() else None
+
+        def paste_scaled(badge: Image.Image, x: int, y: int) -> None:
+            bw = int(badge.width  * scale)
+            bh = int(badge.height * scale)
+            img.paste(badge.resize((bw, bh), Image.LANCZOS), (x, y), badge.resize((bw, bh), Image.LANCZOS))
+
+        off = max(10, int(15 * scale))
+
+        # 1. Resolution badge — top-left
+        res_key = info.get("resolution", "1080p")
+        badge   = load_badge(f"resolution/{res_key}.png") or load_badge("resolution/1080p.png")
+        if badge:
+            paste_scaled(badge, off, off)
+
+        # 2. Audio codec badge — top-center
+        ac_key = info.get("audio_codec")
+        if ac_key:
+            badge = load_badge(f"audio_codec/{ac_key}.png")
+            if badge:
+                bw = int(badge.width * scale)
+                bh = int(badge.height * scale)
+                badge_r = badge.resize((bw, bh), Image.LANCZOS)
+                img.paste(badge_r, ((w - bw) // 2, off), badge_r)
+
+        # 3. IMDb rating badge — bottom-right
+        #    Layout: [IMDb_logo] [dark_pill_with_number]
+        imdb_src  = load_badge("rating/IMDb.png")
+        font_path = KOMETA_ASSETS / "Inter-Bold.ttf"
+        if imdb_src and rating:
+            rating_text = f"{float(rating):.1f}"
+            font_size = max(20, int(63 * scale))
+            try:
+                font = ImageFont.truetype(str(font_path), font_size) \
+                    if font_path.exists() else ImageFont.load_default(size=font_size)
+            except Exception:
+                font = ImageFont.load_default(size=font_size)
+
+            d    = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+            tb   = d.textbbox((0, 0), rating_text, font=font)
+            tw   = tb[2] - tb[0]
+            th   = tb[3] - tb[1]
+
+            badge_h = max(int(75 * scale), th + int(20 * scale))
+            ratio   = badge_h / 75
+            logo    = imdb_src.resize((int(149 * ratio), badge_h), Image.LANCZOS)
+
+            pad   = max(10, int(15 * scale))
+            gap   = max(4,  int(8  * scale))
+            bg_w  = tw + pad * 2
+            total = logo.width + gap + bg_w
+
+            badge = Image.new("RGBA", (total, badge_h), (0, 0, 0, 0))
+            badge.paste(logo, (0, 0), logo)
+
+            bd = ImageDraw.Draw(badge)
+            rx = logo.width + gap
+            bd.rounded_rectangle(
+                [rx, 0, rx + bg_w, badge_h],
+                radius=max(6, int(30 * ratio * 0.6)),
+                fill=(0, 0, 0, 153),
+            )
+            bd.text((rx + pad, (badge_h - th) // 2 - tb[1]),
+                    rating_text, font=font, fill=(255, 255, 255, 255))
+
+            std_off = max(15, int(30 * scale))
+            img.paste(badge, (w - total - std_off, h - badge_h - std_off), badge)
+
+        out = io.BytesIO()
+        img.convert("RGB").save(out, format="JPEG", quality=95)
+        return out.getvalue()
+    except Exception:
+        return poster_bytes
 
 
 @app.route("/api/test-overlay", methods=["POST"])
 def test_overlay():
-    """Run Kometa with a temp config filtered to ONE item, return the overlaid poster."""
+    """Fetch a random poster from Plex and composite Kometa's real badge PNGs onto it.
+    Uses the actual badge images from the kometateam/kometa container — no Kometa run,
+    no side-effects on the Plex library."""
     data = request.json or {}
     tool         = data.get("tool", "pwKometaManager")
     overlay_type = data.get("type", "movies")
@@ -593,10 +657,8 @@ def test_overlay():
     if not SCRIPTS.get(tool):
         return jsonify({"error": "unknown tool"}), 404
 
-    if is_episode:
-        section_id, tag_elem, lib_name = 2, "Directory", "Serien"
-    else:
-        section_id, tag_elem, lib_name = 1, "Video", "Filme"
+    section_id = 2 if is_episode else 1
+    tag_elem   = "Directory" if is_episode else "Video"
 
     # 1. Pick a random item from Plex
     try:
@@ -606,19 +668,18 @@ def test_overlay():
             timeout=15,
         )
         resp.raise_for_status()
-        root  = ET.fromstring(resp.content)
-        items = root.findall(f".//{tag_elem}")
+        items = ET.fromstring(resp.content).findall(f".//{tag_elem}")
         if not items:
-            return jsonify({"error": "No items found in Plex library"}), 404
+            return jsonify({"error": "No items found"}), 404
         item = random.choice(items)
     except Exception as e:
         return jsonify({"error": f"Plex error: {e}"}), 500
 
     plex_title = item.get("title", "")
-    plex_year  = item.get("year")
     show_key   = item.get("ratingKey")
+    rating     = item.get("rating")
 
-    # 2. For episodes: pick one episode to show after the run
+    # 2. For episode mode: pick a random episode
     if is_episode:
         try:
             ep_resp = http_requests.get(
@@ -627,8 +688,7 @@ def test_overlay():
                 timeout=15,
             )
             ep_resp.raise_for_status()
-            ep_root   = ET.fromstring(ep_resp.content)
-            episodes  = ep_root.findall(".//Video")
+            episodes = ET.fromstring(ep_resp.content).findall(".//Video")
             if not episodes:
                 return jsonify({"error": "No episodes found"}), 404
             ep         = random.choice(episodes)
@@ -641,41 +701,7 @@ def test_overlay():
         target_key = show_key
         item_name  = plex_title.encode("ascii", "replace").decode("ascii")
 
-    # 3. Generate temp Kometa config filtered to this item only
-    config_content = _build_test_overlay_config(lib_name, plex_title, plex_year, is_episode)
-    temp_cfg_local = KOMETA_CONFIG_LOCAL / "config_test_overlay.yml"
-    try:
-        temp_cfg_local.write_text(config_content, encoding="utf-8")
-    except Exception as e:
-        return jsonify({"error": f"Cannot write temp config: {e}"}), 500
-
-    # 4. Run Kometa with the temp config (synchronous, up to 3 minutes)
-    try:
-        result = subprocess.run(
-            [
-                "docker", "run", "--rm",
-                "-v", f"{KOMETA_CONFIG_DIR}:/config:rw",
-                KOMETA_IMAGE,
-                "--config", "/config/config_test_overlay.yml",
-                "--run",
-            ],
-            capture_output=True,
-            timeout=180,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
-            return jsonify({"error": f"Kometa exited {result.returncode}: {stderr}"}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Kometa timed out (>3 min)"}), 500
-    except Exception as e:
-        return jsonify({"error": f"Docker error: {e}"}), 500
-    finally:
-        try:
-            temp_cfg_local.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-    # 5. Return the now-overlaid poster/thumb from Plex
+    # 3. Fetch poster/thumb
     try:
         thumb_resp = http_requests.get(
             f"{PLEX_URL}/library/metadata/{target_key}/thumb",
@@ -683,10 +709,13 @@ def test_overlay():
             timeout=15,
         )
         if not thumb_resp.ok:
-            return jsonify({"error": "Could not fetch image from Plex after Kometa run"}), 500
+            return jsonify({"error": "Could not fetch image from Plex"}), 500
         poster_data = thumb_resp.content
     except Exception as e:
         return jsonify({"error": f"Thumb fetch error: {e}"}), 500
+
+    # 4. Composite Kometa's real badge PNGs onto the poster
+    poster_data = _composite_kometa_overlays(poster_data, rating, target_key)
 
     response = Response(poster_data, mimetype="image/jpeg")
     response.headers["X-Item-Name"] = item_name

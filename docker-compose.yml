@@ -18,7 +18,8 @@ services:
       - /mnt/user/appdata/kometa/config:/kometa-config:rw
       # Media directories (pwMediaEnhancer needs write access to move files)
       - /mnt/user/Fileserver:/fileserver
-      # Log output + persisted settings
+      # Kometa badge assets (pre-extracted from kometateam/kometa image)
+      - /mnt/user/appdata/pwMediaManager/kometa_assets:/kometa-assets:ro
       - /mnt/user/appdata/pwMediaManager/logs:/logs
       # Docker CLI access (to launch Kometa container)
       - /var/run/docker.sock:/var/run/docker.sock
